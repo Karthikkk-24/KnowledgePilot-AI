@@ -1,0 +1,39 @@
+{
+  "name": "knowledgepilot-ai",
+  "private": true,
+  "packageManager": "pnpm@10.33.3",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
+    "graphify:extract": "graphify extract . --code-only",
+    "graphify:cluster": "graphify cluster-only . --no-label",
+    "graphify:update": "graphify update .",
+    "graphify:wiki": "graphify export wiki --graph graphify-out/graph.json",
+    "graphify:query": "graphify query",
+    "graphify:god": "graphify god-nodes",
+    "graphify:report": "graphify extract . --code-only && graphify cluster-only . --no-label && graphify export wiki --graph graphify-out/graph.json",
+    "graphify:hooks": "graphify hook install"
+  },
+
+  "devDependencies": {
+    "prettier": "^3.5.3",
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@nestjs/core",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

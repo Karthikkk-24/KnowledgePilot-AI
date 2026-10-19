@@ -1,0 +1,56 @@
+# Dependencies & package managers
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.turbo/
+.vercel/
+.netlify/
+coverage/
+playwright-report/
+test-results/
+
+# Generated / local tooling noise
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/converted/
+
+# Local env & secrets
+.env
+.env.*
+!.env.example
+
+# OS / IDE
+.DS_Store
+.idea/
+.history/
+
+# Local uploads / docker volumes
+uploads/
+.uploads/
+storage/
+.docker-data/
+postgres-data/
+redis-data/
+
+# Lockfiles are not useful graph nodes
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Large binary / media (add semantic extraction later if needed)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.pdf
+*.zip
+*.tar
+*.gz

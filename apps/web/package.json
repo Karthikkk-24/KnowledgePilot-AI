@@ -1,0 +1,31 @@
+{
+  "name": "@knowledgepilot/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts",
+    "clean": "rm -rf .next .turbo"
+  },
+  "dependencies": {
+    "@knowledgepilot/shared": "workspace:*",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@knowledgepilot/eslint-config": "workspace:*",
+    "@knowledgepilot/typescript-config": "workspace:*",
+    "@knowledgepilot/vitest-config": "workspace:*",
+    "@types/node": "^22.15.29",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "eslint": "^9.28.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.1"
+  }
+}

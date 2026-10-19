@@ -1,0 +1,137 @@
+# --- Dependencies ---
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# --- Builds / outputs ---
+dist/
+build/
+out/
+.tmp/
+tmp/
+*.tsbuildinfo
+.next/
+.nuxt/
+.turbo/
+.vercel/
+.netlify/
+.output/
+.svelte-kit/
+
+# NestJS / compiled
+apps/api/dist/
+**/dist/
+
+# --- Env & secrets (keep .env.example tracked) ---
+.env
+.env.*
+!.env.example
+!.env*.example
+*.pem
+*.p12
+*.key
+credentials.json
+service-account*.json
+secrets/
+.secrets/
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# --- Test / coverage ---
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+vitest.config.ts.timestamp-*
+
+# --- Caches ---
+.cache/
+.eslintcache
+.prettiercache
+*.swp
+*.swo
+.parcel-cache/
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# --- Prisma ---
+# Keep schema & migrations tracked; ignore generated client if checked out locally
+packages/db/prisma/*.db
+packages/db/prisma/*.db-journal
+**/prisma/dev.db
+**/prisma/dev.db-journal
+
+# --- Local uploads / ephemeral storage (PaaS disks are ephemeral) ---
+uploads/
+.uploads/
+storage/
+.tmp-storage/
+data/uploads/
+
+# --- Docker / local infra volumes ---
+.docker-data/
+postgres-data/
+redis-data/
+*.sql.gz
+*.dump
+
+# --- OS ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# --- IDEs / editors ---
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+!.vscode/launch.json.example
+*.code-workspace
+.history/
+
+# --- Cursor (keep shared rules; ignore local/cache junk) ---
+.cursor/cache/
+.cursor/*.log
+
+# --- Graphify (commit graph for shared context; ignore caches/cost) ---
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/converted/
+
+# --- Misc tooling ---
+.snyk/
+*.pid
+*.seed
+*.pid.lock
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# --- Optional local notes ---
+*.local.md
+TODO.local.md
+
+.cursor/*
+*.md 
+graphify-out

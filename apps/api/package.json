@@ -1,0 +1,38 @@
+{
+  "name": "@knowledgepilot/api",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@knowledgepilot/config": "workspace:*",
+    "@knowledgepilot/db": "workspace:*",
+    "@knowledgepilot/logger": "workspace:*",
+    "@knowledgepilot/rag": "workspace:*",
+    "@knowledgepilot/shared": "workspace:*",
+    "@nestjs/common": "^11.1.3",
+    "@nestjs/core": "^11.1.3",
+    "@nestjs/platform-express": "^11.1.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@knowledgepilot/eslint-config": "workspace:*",
+    "@knowledgepilot/typescript-config": "workspace:*",
+    "@knowledgepilot/vitest-config": "workspace:*",
+    "@nestjs/cli": "^11.0.7",
+    "@nestjs/schematics": "^11.0.5",
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.29",
+    "eslint": "^9.28.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.1"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@knowledgepilot/config",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "zod": "^3.25.42"
+  },
+  "devDependencies": {
+    "@knowledgepilot/eslint-config": "workspace:*",
+    "@knowledgepilot/typescript-config": "workspace:*",
+    "@knowledgepilot/vitest-config": "workspace:*",
+    "@types/node": "^22.15.29",
+    "eslint": "^9.28.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.1"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts"
+}
