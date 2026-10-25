@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { ok } from '../../common/http';
 import { HealthService } from './health.service';
 
 @Controller()
@@ -7,19 +8,11 @@ export class HealthController {
 
   @Get('health')
   getHealth() {
-    return {
-      data: this.healthService.getHealth(),
-      error: null,
-      meta: { requestId: 'phase0' },
-    };
+    return ok(this.healthService.getHealth());
   }
 
   @Get('ready')
-  getReady() {
-    return {
-      data: this.healthService.getReady(),
-      error: null,
-      meta: { requestId: 'phase0' },
-    };
+  async getReady() {
+    return ok(await this.healthService.getReady());
   }
 }

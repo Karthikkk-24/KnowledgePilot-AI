@@ -1,9 +1,184 @@
-// Prisma models land in Phase 1. This file documents the intended datasource only.
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DB_DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DB_DATABASE_URL")
+  extensions = [vector]
+}
+
+enum DocumentStatus {
+  pending
+  queued
+  processing
+  ready
+  failed
+
+  @@map("document_status")
+}
+
+enum IngestionJobState {
+  queued
+  processing
+  extracting
+  chunking
+  embedding
+  indexing
+  ready
+  failed
+
+  @@map("ingestion_job_state")
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+
+  @@map("message_role")
+}
+
+model Tenant {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  documents     Document[]
+  conversations Conversation[]
+  ingestionJobs IngestionJob[]
+
+  @@map("tenants")
+}
+
+model Document {
+  id               String         @id @default(cuid())
+  tenantId         String         @map("tenant_id")
+  title            String
+  originalFilename String         @map("original_filename")
+  mimeType         String         @map("mime_type")
+  storageKey       String         @map("storage_key")
+  byteSize         Int            @map("byte_size")
+  contentHash      String         @map("content_hash")
+  status           DocumentStatus @default(pending)
+  pageCount        Int?           @map("page_count")
+  chunkingStrategy String         @default("structure_aware") @map("chunking_strategy")
+  embeddingModel   String?        @map("embedding_model")
+  errorMessage     String?        @map("error_message")
+  metadata         Json           @default("{}")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  deletedAt        DateTime?      @map("deleted_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  chunks        Chunk[]
+  ingestionJobs IngestionJob[]
+
+  @@unique([tenantId, contentHash])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@map("documents")
+}
+
+model Chunk {
+  id           String                       @id @default(cuid())
+  tenantId     String                       @map("tenant_id")
+  documentId   String                       @map("document_id")
+  parentChunkId String?                     @map("parent_chunk_id")
+  content      String
+  tokenCount   Int                          @map("token_count")
+  headingPath  String?                      @map("heading_path")
+  pageStart    Int?                         @map("page_start")
+  pageEnd      Int?                         @map("page_end")
+  charStart    Int                          @map("char_start")
+  charEnd      Int                          @map("char_end")
+  ordinal      Int
+  embedding    Unsupported("vector(1536)")?
+  createdAt    DateTime                     @default(now()) @map("created_at")
+  updatedAt    DateTime                     @updatedAt @map("updated_at")
+
+  document  Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  parent    Chunk?     @relation("ChunkHierarchy", fields: [parentChunkId], references: [id], onDelete: SetNull)
+  children  Chunk[]    @relation("ChunkHierarchy")
+  citations Citation[]
+
+  @@index([tenantId, documentId])
+  @@index([documentId, ordinal])
+  @@map("chunks")
+}
+
+model IngestionJob {
+  id         String            @id @default(cuid())
+  tenantId   String            @map("tenant_id")
+  documentId String            @map("document_id")
+  bullJobId  String?           @map("bull_job_id")
+  state      IngestionJobState @default(queued)
+  attempt    Int               @default(0)
+  progress   Int               @default(0)
+  lastError  String?           @map("last_error")
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+  finishedAt DateTime?         @map("finished_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, state])
+  @@index([documentId])
+  @@map("ingestion_jobs")
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  tenantId  String    @map("tenant_id")
+  title     String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  messages Message[]
+
+  @@index([tenantId, createdAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  tenantId       String      @map("tenant_id")
+  conversationId String      @map("conversation_id")
+  role           MessageRole
+  content        String
+  abstained      Boolean     @default(false)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  citations    Citation[]
+
+  @@index([tenantId, conversationId])
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model Citation {
+  id         String   @id @default(cuid())
+  tenantId   String   @map("tenant_id")
+  messageId  String   @map("message_id")
+  chunkId    String   @map("chunk_id")
+  documentId String   @map("document_id")
+  quote      String
+  page       Int?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  chunk   Chunk   @relation(fields: [chunkId], references: [id], onDelete: Restrict)
+
+  @@index([messageId])
+  @@index([tenantId, chunkId])
+  @@map("citations")
 }

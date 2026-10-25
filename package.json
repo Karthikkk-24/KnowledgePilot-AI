@@ -20,8 +20,13 @@
     "graphify:query": "graphify query",
     "graphify:god": "graphify god-nodes",
     "graphify:report": "graphify extract . --code-only && graphify cluster-only . --no-label && graphify export wiki --graph graphify-out/graph.json",
-    "graphify:hooks": "graphify hook install"
+    "graphify:hooks": "graphify hook install",
+    "db:generate": "pnpm --filter @knowledgepilot/db prisma:generate",
+    "db:migrate": "pnpm --filter @knowledgepilot/db exec prisma migrate deploy",
+    "db:migrate:dev": "pnpm --filter @knowledgepilot/db exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @knowledgepilot/db exec prisma migrate deploy"
   },
+
 
   "devDependencies": {
     "prettier": "^3.5.3",
