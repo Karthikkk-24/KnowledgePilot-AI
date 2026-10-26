@@ -4,23 +4,40 @@ import { createDbClient, MessageRole, STUB_TENANT_ID } from '@knowledgepilot/db'
 import {
   createRagOrchestrator,
   defaultPipelineConfig,
+  normalizeMetadataFilters,
   type AnswerPayload,
+  type MetadataFilters,
+  type RetrievalStrategy,
   type StreamEvent,
 } from '@knowledgepilot/rag';
-import { createEmbedder, createLlmClient } from '../../adapters/ai.factory';
+import { createEmbedder, createLlmClient, createReranker } from '../../adapters/ai.factory';
 import { createPrismaChunkRepository } from '../../adapters/prisma-chunk.repository';
+
+export type ChatMessageOptions = {
+  retrievalStrategy?: RetrievalStrategy;
+  rerankingEnabled?: boolean;
+  topK?: number;
+  filters?: MetadataFilters;
+};
 
 @Injectable()
 export class ChatService {
   private readonly db = createDbClient();
   private readonly env = loadEnv();
+  private readonly defaultStrategy: RetrievalStrategy = this.env.hybridSearchEnabled
+    ? this.env.RAG_RETRIEVAL_STRATEGY
+    : 'vector';
   private readonly rag = createRagOrchestrator({
     embedder: createEmbedder(this.env),
     llm: createLlmClient(this.env),
     chunks: createPrismaChunkRepository(this.db),
+    reranker: createReranker(this.env),
     defaultConfig: {
       ...defaultPipelineConfig,
+      retrievalStrategy: this.defaultStrategy,
+      rerankingEnabled: this.env.rerankingEnabled,
       topK: this.env.RAG_DEFAULT_TOP_K,
+      abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
     },
     abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
   });
@@ -105,7 +122,27 @@ export class ChatService {
     };
   }
 
-  async *streamMessage(conversationId: string, content: string): AsyncGenerator<StreamEvent & { userMessageId?: string; assistantMessageId?: string }> {
+  resolveConfig(options?: ChatMessageOptions) {
+    let retrievalStrategy = options?.retrievalStrategy ?? this.defaultStrategy;
+    if (!this.env.hybridSearchEnabled && retrievalStrategy === 'hybrid') {
+      retrievalStrategy = 'vector';
+    }
+
+    const rerankingEnabled =
+      options?.rerankingEnabled ?? this.env.rerankingEnabled;
+
+    return {
+      retrievalStrategy,
+      rerankingEnabled: Boolean(rerankingEnabled),
+      topK: options?.topK ?? this.env.RAG_DEFAULT_TOP_K,
+    };
+  }
+
+  async *streamMessage(
+    conversationId: string,
+    content: string,
+    options?: ChatMessageOptions,
+  ): AsyncGenerator<StreamEvent & { userMessageId?: string; assistantMessageId?: string }> {
     const conversation = await this.db.conversation.findFirst({
       where: { id: conversationId, tenantId: STUB_TENANT_ID, deletedAt: null },
     });
@@ -129,10 +166,15 @@ export class ChatService {
       });
     }
 
+    const config = this.resolveConfig(options);
+    const filters = normalizeMetadataFilters(options?.filters);
+
     let finalPayload: AnswerPayload | null = null;
     for await (const event of this.rag.answerStream({
       tenantId: STUB_TENANT_ID,
       query: content.trim(),
+      config,
+      filters,
     })) {
       if (event.type === 'done') {
         finalPayload = event.payload;
@@ -147,7 +189,12 @@ export class ChatService {
         abstained: true,
         abstentionReason: 'pipeline_error',
         citations: [],
-        diagnostics: { retrievedChunkIds: [], latencyMs: {} },
+        diagnostics: {
+          retrievalStrategy: config.retrievalStrategy,
+          rerankingEnabled: config.rerankingEnabled,
+          retrievedChunkIds: [],
+          latencyMs: {},
+        },
       };
     }
 

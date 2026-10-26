@@ -6,6 +6,50 @@ export type ApiEnvelope<T> = {
   meta: { requestId: string };
 };
 
+export type RetrievalStrategy = 'vector' | 'keyword' | 'hybrid';
+
+export type ChatFilters = {
+  documentIds?: string[];
+  mimeTypes?: string[];
+  tags?: string[];
+  createdAfter?: string;
+  createdBefore?: string;
+};
+
+export type ChatStreamOptions = {
+  retrievalStrategy?: RetrievalStrategy;
+  rerankingEnabled?: boolean;
+  topK?: number;
+  filters?: ChatFilters;
+};
+
+export type AnswerDiagnostics = {
+  retrievalStrategy: RetrievalStrategy;
+  rerankingEnabled: boolean;
+  retrievedChunkIds: string[];
+  rerankedChunkIds?: string[];
+  invalidCitationIds?: string[];
+  latencyMs: Record<string, number>;
+  topScore?: number;
+  scoreKind?: string;
+};
+
+export type AnswerCitation = {
+  chunkId: string;
+  documentId: string;
+  quote: string;
+  page?: number;
+  documentTitle?: string;
+};
+
+export type AnswerPayload = {
+  text: string;
+  abstained: boolean;
+  abstentionReason?: string;
+  citations: AnswerCitation[];
+  diagnostics: AnswerDiagnostics;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, init);
   const json = (await response.json()) as ApiEnvelope<T>;
@@ -69,13 +113,7 @@ export const api = {
         role: 'user' | 'assistant' | 'system';
         content: string;
         abstained: boolean;
-        citations: Array<{
-          chunkId: string;
-          documentId: string;
-          quote: string;
-          page?: number;
-          documentTitle?: string;
-        }>;
+        citations: AnswerCitation[];
         createdAt: string;
       }>;
     }>(`/v1/conversations/${id}`),
@@ -97,31 +135,23 @@ export function streamChatMessage(
   content: string,
   handlers: {
     onToken: (text: string) => void;
-    onCitation: (citation: {
-      chunkId: string;
-      documentId: string;
-      quote: string;
-      page?: number;
-      documentTitle?: string;
-    }) => void;
-    onDone: (payload: {
-      text: string;
-      abstained: boolean;
-      citations: Array<{
-        chunkId: string;
-        documentId: string;
-        quote: string;
-        page?: number;
-        documentTitle?: string;
-      }>;
-    }) => void;
+    onCitation: (citation: AnswerCitation) => void;
+    onDiagnostics?: (diagnostics: AnswerDiagnostics) => void;
+    onDone: (payload: AnswerPayload) => void;
     onError: (message: string) => void;
   },
+  options?: ChatStreamOptions,
 ): Promise<void> {
   return fetch(`${API_URL}/v1/conversations/${conversationId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      retrievalStrategy: options?.retrievalStrategy,
+      rerankingEnabled: options?.rerankingEnabled,
+      topK: options?.topK,
+      filters: options?.filters,
+    }),
   }).then(async (response) => {
     if (!response.ok || !response.body) {
       handlers.onError(`Chat request failed (${response.status})`);
@@ -153,29 +183,11 @@ export function streamChatMessage(
           if (eventName === 'token' && typeof data.text === 'string') {
             handlers.onToken(data.text);
           } else if (eventName === 'citation' && data.citation) {
-            handlers.onCitation(
-              data.citation as {
-                chunkId: string;
-                documentId: string;
-                quote: string;
-                page?: number;
-                documentTitle?: string;
-              },
-            );
+            handlers.onCitation(data.citation as AnswerCitation);
+          } else if (eventName === 'diagnostics' && data.diagnostics) {
+            handlers.onDiagnostics?.(data.diagnostics as AnswerDiagnostics);
           } else if (eventName === 'done' && data.payload) {
-            handlers.onDone(
-              data.payload as {
-                text: string;
-                abstained: boolean;
-                citations: Array<{
-                  chunkId: string;
-                  documentId: string;
-                  quote: string;
-                  page?: number;
-                  documentTitle?: string;
-                }>;
-              },
-            );
+            handlers.onDone(data.payload as AnswerPayload);
           } else if (eventName === 'error') {
             handlers.onError(String(data.message ?? 'Stream error'));
           }

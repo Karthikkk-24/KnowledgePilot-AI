@@ -15,10 +15,23 @@ export function parseCitationIds(text: string): string[] {
   return [...ids];
 }
 
+export function stripInvalidCitations(text: string, invalidIds: string[]): string {
+  let cleaned = text;
+  for (const id of invalidIds) {
+    cleaned = cleaned.replaceAll(`[chunk:${id}]`, '');
+  }
+  return cleaned.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
 export function validateCitations(
   text: string,
   retrievedChunkIds: string[],
-): { validIds: string[]; invalidIds: string[]; citations: ParsedCitation[] } {
+): {
+  validIds: string[];
+  invalidIds: string[];
+  citations: ParsedCitation[];
+  cleanedText: string;
+} {
   const allowed = new Set(retrievedChunkIds);
   const parsed = parseCitationIds(text);
   const validIds = parsed.filter((id) => allowed.has(id));
@@ -27,6 +40,7 @@ export function validateCitations(
     validIds,
     invalidIds,
     citations: validIds.map((chunkId) => ({ chunkId })),
+    cleanedText: stripInvalidCitations(text, invalidIds),
   };
 }
 

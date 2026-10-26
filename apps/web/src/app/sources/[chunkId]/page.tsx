@@ -41,7 +41,11 @@ export default function SourcePreviewPage() {
           <p style={{ color: 'var(--muted)', marginTop: 0 }}>
             {chunk.document.originalFilename}
             {chunk.headingPath ? ` · ${chunk.headingPath}` : ''}
-            {chunk.pageStart != null ? ` · page ${chunk.pageStart}` : ''}
+            {chunk.pageStart != null
+              ? chunk.pageEnd != null && chunk.pageEnd !== chunk.pageStart
+                ? ` · pages ${chunk.pageStart}–${chunk.pageEnd}`
+                : ` · page ${chunk.pageStart}`
+              : ''}
           </p>
           <pre
             style={{

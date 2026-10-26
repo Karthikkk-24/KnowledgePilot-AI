@@ -7,20 +7,24 @@ export type PipelineConfig = {
   rerankingEnabled: boolean;
   topK: number;
   rerankTopN: number;
+  candidateMultiplier: number;
   queryRewriteEnabled: boolean;
   multiQueryEnabled: boolean;
   contextCompressionEnabled: boolean;
   abstentionThreshold: number;
+  rrfK: number;
 };
 
 export const defaultPipelineConfig: PipelineConfig = {
-  retrievalStrategy: 'vector',
-  chunkingStrategy: 'fixed',
+  retrievalStrategy: 'hybrid',
+  chunkingStrategy: 'structure_aware',
   rerankingEnabled: false,
   topK: 8,
   rerankTopN: 5,
+  candidateMultiplier: 4,
   queryRewriteEnabled: false,
   multiQueryEnabled: false,
   contextCompressionEnabled: false,
-  abstentionThreshold: 0.25,
+  abstentionThreshold: 0.15,
+  rrfK: 60,
 };

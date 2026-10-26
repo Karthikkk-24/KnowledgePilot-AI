@@ -4,7 +4,8 @@ services:
     container_name: knowledgepilot-postgres
     restart: unless-stopped
     ports:
-      - '5432:5432'
+      # 5433 on host avoids clashing with a local Homebrew/Postgres.app on 5432
+      - '5433:5432'
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

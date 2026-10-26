@@ -3,7 +3,10 @@ import { GROUNDED_SYSTEM_PROMPT } from '../prompting/grounded-system-prompt';
 import type { ChunkRepository, RetrievedChunk } from '../ports/chunk-repository';
 import type { Embedder } from '../ports/embedder';
 import type { LlmClient } from '../ports/llm-client';
+import type { Reranker } from '../ports/reranker';
+import { normalizeMetadataFilters, type MetadataFilters } from '../retrieval/metadata-filters';
 import { type PipelineConfig } from '../types';
+import { shouldAbstainOnRetrieval } from './decide-abstention';
 import { isAbstentionResponse, validateCitations } from './validate-citations';
 
 export type AnswerCitation = {
@@ -20,30 +23,41 @@ export type AnswerPayload = {
   abstentionReason?: string;
   citations: AnswerCitation[];
   diagnostics: {
+    retrievalStrategy: PipelineConfig['retrievalStrategy'];
+    rerankingEnabled: boolean;
     retrievedChunkIds: string[];
+    rerankedChunkIds?: string[];
+    invalidCitationIds?: string[];
     latencyMs: Record<string, number>;
+    topScore?: number;
+    scoreKind?: string;
   };
 };
 
 export type StreamEvent =
   | { type: 'token'; text: string }
   | { type: 'citation'; citation: AnswerCitation }
+  | { type: 'diagnostics'; diagnostics: AnswerPayload['diagnostics'] }
   | { type: 'done'; payload: AnswerPayload }
   | { type: 'error'; message: string };
 
+export type AnswerInput = {
+  tenantId: string;
+  query: string;
+  config?: Partial<PipelineConfig>;
+  filters?: MetadataFilters;
+};
+
 export type RagOrchestrator = {
-  answer(input: { tenantId: string; query: string; config?: Partial<PipelineConfig> }): Promise<AnswerPayload>;
-  answerStream(input: {
-    tenantId: string;
-    query: string;
-    config?: Partial<PipelineConfig>;
-  }): AsyncGenerator<StreamEvent>;
+  answer(input: AnswerInput): Promise<AnswerPayload>;
+  answerStream(input: AnswerInput): AsyncGenerator<StreamEvent>;
 };
 
 export type RagDeps = {
   embedder: Embedder;
   llm: LlmClient;
   chunks: ChunkRepository;
+  reranker?: Reranker;
   defaultConfig: PipelineConfig;
   abstentionThreshold: number;
 };
@@ -56,9 +70,7 @@ function buildCitations(validIds: string[], retrieved: RetrievedChunk[]): Answer
   const byId = new Map(retrieved.map((c) => [c.id, c]));
   return validIds.flatMap((id) => {
     const chunk = byId.get(id);
-    if (!chunk) {
-      return [];
-    }
+    if (!chunk) return [];
     return [
       {
         chunkId: chunk.id,
@@ -73,18 +85,43 @@ function buildCitations(validIds: string[], retrieved: RetrievedChunk[]): Answer
 
 function finalizeAnswer(
   rawText: string,
-  retrieved: RetrievedChunk[],
+  evidence: RetrievedChunk[],
   latencyMs: Record<string, number>,
-  abstentionThreshold: number,
+  config: PipelineConfig,
+  extras: {
+    retrievedChunkIds: string[];
+    rerankedChunkIds?: string[];
+    forceAbstain?: { reason: string };
+  },
 ): AnswerPayload {
-  const retrievedIds = retrieved.map((c) => c.id);
-  if (retrieved.length === 0 || (retrieved[0]?.score ?? 0) < abstentionThreshold) {
+  const evidenceIds = evidence.map((c) => c.id);
+  const baseDiagnostics = {
+    retrievalStrategy: config.retrievalStrategy,
+    rerankingEnabled: config.rerankingEnabled,
+    retrievedChunkIds: extras.retrievedChunkIds,
+    rerankedChunkIds: extras.rerankedChunkIds,
+    latencyMs,
+    topScore: evidence[0]?.score,
+    scoreKind: evidence[0]?.scoreKind,
+  };
+
+  if (extras.forceAbstain) {
     return {
       text: 'I could not find enough evidence in your documents to answer that.',
       abstained: true,
-      abstentionReason: retrieved.length === 0 ? 'empty_retrieval' : 'low_score',
+      abstentionReason: extras.forceAbstain.reason,
       citations: [],
-      diagnostics: { retrievedChunkIds: retrievedIds, latencyMs },
+      diagnostics: baseDiagnostics,
+    };
+  }
+
+  if (!rawText.trim()) {
+    return {
+      text: 'I could not find enough evidence in your documents to answer that.',
+      abstained: true,
+      abstentionReason: 'empty_retrieval',
+      citations: [],
+      diagnostics: baseDiagnostics,
     };
   }
 
@@ -94,47 +131,97 @@ function finalizeAnswer(
       abstained: true,
       abstentionReason: 'model_abstention',
       citations: [],
-      diagnostics: { retrievedChunkIds: retrievedIds, latencyMs },
+      diagnostics: baseDiagnostics,
     };
   }
 
-  const validation = validateCitations(rawText, retrievedIds);
+  const validation = validateCitations(rawText, evidenceIds);
   if (validation.validIds.length === 0) {
     return {
       text: 'I could not produce a grounded answer with valid citations from the retrieved evidence.',
       abstained: true,
       abstentionReason: 'citation_validation_failed',
       citations: [],
-      diagnostics: { retrievedChunkIds: retrievedIds, latencyMs },
+      diagnostics: {
+        ...baseDiagnostics,
+        invalidCitationIds: validation.invalidIds,
+      },
     };
   }
 
   return {
-    text: rawText.trim(),
+    text: validation.cleanedText,
     abstained: false,
-    citations: buildCitations(validation.validIds, retrieved),
-    diagnostics: { retrievedChunkIds: retrievedIds, latencyMs },
+    citations: buildCitations(validation.validIds, evidence),
+    diagnostics: {
+      ...baseDiagnostics,
+      invalidCitationIds: validation.invalidIds.length > 0 ? validation.invalidIds : undefined,
+    },
   };
 }
 
 export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
-  async function retrieve(tenantId: string, query: string, config: PipelineConfig) {
+  async function retrieveAndMaybeRerank(input: AnswerInput, config: PipelineConfig) {
     const latencyMs: Record<string, number> = {};
-    const embedStarted = Date.now();
-    const [queryEmbedding] = await deps.embedder.embed([query]);
-    latencyMs.embed = Date.now() - embedStarted;
-    if (!queryEmbedding) {
-      throw new Error('Embedder returned no vector for query');
+    const filters = normalizeMetadataFilters(input.filters);
+    const candidateCount = config.rerankingEnabled
+      ? Math.max(config.topK * config.candidateMultiplier, config.rerankTopN * 2)
+      : config.topK;
+
+    let embedding: number[] | undefined;
+    if (config.retrievalStrategy === 'vector' || config.retrievalStrategy === 'hybrid') {
+      const embedStarted = Date.now();
+      const [queryEmbedding] = await deps.embedder.embed([input.query]);
+      latencyMs.embed = Date.now() - embedStarted;
+      if (!queryEmbedding) {
+        throw new Error('Embedder returned no vector for query');
+      }
+      embedding = queryEmbedding;
     }
 
     const retrieveStarted = Date.now();
-    const retrieved = await deps.chunks.similaritySearch({
-      tenantId,
-      embedding: queryEmbedding,
-      topK: config.topK,
+    let retrieved = await deps.chunks.search({
+      tenantId: input.tenantId,
+      query: input.query,
+      embedding,
+      topK: candidateCount,
+      strategy: config.retrievalStrategy,
+      filters,
     });
     latencyMs.retrieve = Date.now() - retrieveStarted;
-    return { retrieved, latencyMs };
+
+    const retrievedChunkIds = retrieved.map((c) => c.id);
+    let rerankedChunkIds: string[] | undefined;
+
+    const abstainCheck = shouldAbstainOnRetrieval(
+      retrieved,
+      config.retrievalStrategy,
+      deps.abstentionThreshold,
+    );
+    if (abstainCheck.abstain) {
+      return {
+        evidence: [] as RetrievedChunk[],
+        latencyMs,
+        retrievedChunkIds,
+        rerankedChunkIds,
+        forceAbstain: { reason: abstainCheck.reason ?? 'empty_retrieval' },
+      };
+    }
+
+    if (config.rerankingEnabled && deps.reranker && retrieved.length > 0) {
+      const rerankStarted = Date.now();
+      retrieved = await deps.reranker.rerank({
+        query: input.query,
+        chunks: retrieved,
+        topN: config.rerankTopN,
+      });
+      latencyMs.rerank = Date.now() - rerankStarted;
+      rerankedChunkIds = retrieved.map((c) => c.id);
+    } else {
+      retrieved = retrieved.slice(0, config.topK);
+    }
+
+    return { evidence: retrieved, latencyMs, retrievedChunkIds, rerankedChunkIds };
   }
 
   function buildMessages(query: string, retrieved: RetrievedChunk[]) {
@@ -150,36 +237,65 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
   return {
     async answer(input) {
       const config = mergeConfig(deps.defaultConfig, input.config);
-      const { retrieved, latencyMs } = await retrieve(input.tenantId, input.query, config);
-      if (retrieved.length === 0 || (retrieved[0]?.score ?? 0) < deps.abstentionThreshold) {
-        return finalizeAnswer('', retrieved, latencyMs, deps.abstentionThreshold);
+      const stage = await retrieveAndMaybeRerank(input, config);
+      if (stage.forceAbstain || stage.evidence.length === 0) {
+        return finalizeAnswer('', stage.evidence, stage.latencyMs, config, {
+          retrievedChunkIds: stage.retrievedChunkIds,
+          rerankedChunkIds: stage.rerankedChunkIds,
+          forceAbstain: stage.forceAbstain ?? { reason: 'empty_retrieval' },
+        });
       }
 
       const genStarted = Date.now();
-      const raw = await deps.llm.complete(buildMessages(input.query, retrieved));
-      latencyMs.generate = Date.now() - genStarted;
-      return finalizeAnswer(raw, retrieved, latencyMs, deps.abstentionThreshold);
+      const raw = await deps.llm.complete(buildMessages(input.query, stage.evidence));
+      stage.latencyMs.generate = Date.now() - genStarted;
+      return finalizeAnswer(raw, stage.evidence, stage.latencyMs, config, {
+        retrievedChunkIds: stage.retrievedChunkIds,
+        rerankedChunkIds: stage.rerankedChunkIds,
+      });
     },
 
     async *answerStream(input) {
       try {
         const config = mergeConfig(deps.defaultConfig, input.config);
-        const { retrieved, latencyMs } = await retrieve(input.tenantId, input.query, config);
-        if (retrieved.length === 0 || (retrieved[0]?.score ?? 0) < deps.abstentionThreshold) {
-          const payload = finalizeAnswer('', retrieved, latencyMs, deps.abstentionThreshold);
+        const stage = await retrieveAndMaybeRerank(input, config);
+
+        if (stage.forceAbstain || stage.evidence.length === 0) {
+          const payload = finalizeAnswer('', stage.evidence, stage.latencyMs, config, {
+            retrievedChunkIds: stage.retrievedChunkIds,
+            rerankedChunkIds: stage.rerankedChunkIds,
+            forceAbstain: stage.forceAbstain ?? { reason: 'empty_retrieval' },
+          });
+          yield { type: 'diagnostics', diagnostics: payload.diagnostics } satisfies StreamEvent;
           yield { type: 'token', text: payload.text } satisfies StreamEvent;
           yield { type: 'done', payload } satisfies StreamEvent;
           return;
         }
 
+        yield {
+          type: 'diagnostics',
+          diagnostics: {
+            retrievalStrategy: config.retrievalStrategy,
+            rerankingEnabled: config.rerankingEnabled,
+            retrievedChunkIds: stage.retrievedChunkIds,
+            rerankedChunkIds: stage.rerankedChunkIds,
+            latencyMs: stage.latencyMs,
+            topScore: stage.evidence[0]?.score,
+            scoreKind: stage.evidence[0]?.scoreKind,
+          },
+        } satisfies StreamEvent;
+
         const genStarted = Date.now();
         let raw = '';
-        for await (const token of deps.llm.stream(buildMessages(input.query, retrieved))) {
+        for await (const token of deps.llm.stream(buildMessages(input.query, stage.evidence))) {
           raw += token;
           yield { type: 'token', text: token } satisfies StreamEvent;
         }
-        latencyMs.generate = Date.now() - genStarted;
-        const payload = finalizeAnswer(raw, retrieved, latencyMs, deps.abstentionThreshold);
+        stage.latencyMs.generate = Date.now() - genStarted;
+        const payload = finalizeAnswer(raw, stage.evidence, stage.latencyMs, config, {
+          retrievedChunkIds: stage.retrievedChunkIds,
+          rerankedChunkIds: stage.rerankedChunkIds,
+        });
         for (const citation of payload.citations) {
           yield { type: 'citation', citation } satisfies StreamEvent;
         }

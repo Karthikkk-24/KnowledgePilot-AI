@@ -98,6 +98,7 @@ model Chunk {
   charEnd      Int                          @map("char_end")
   ordinal      Int
   embedding    Unsupported("vector(1536)")?
+  searchVector Unsupported("tsvector")?     @map("search_vector")
   createdAt    DateTime                     @default(now()) @map("created_at")
   updatedAt    DateTime                     @updatedAt @map("updated_at")
 
