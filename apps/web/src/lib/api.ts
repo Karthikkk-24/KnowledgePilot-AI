@@ -50,6 +50,40 @@ export type AnswerPayload = {
   diagnostics: AnswerDiagnostics;
 };
 
+export type EvalRunSummary = {
+  id: string;
+  label: string | null;
+  state: string;
+  progress: number;
+  itemCount: number;
+  completedCount: number;
+  metricsSummary: Record<string, unknown> | null;
+  latencyMsTotal: number | null;
+  estimatedCostUsd: number | null;
+  errorMessage: string | null;
+  configSnapshot: Record<string, unknown>;
+  benchmarkSet: { id: string; name: string; version: string };
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+};
+
+export type EvalRunDetail = EvalRunSummary & {
+  items: Array<{
+    id: string;
+    benchmarkItemId: string;
+    question: string;
+    expectedAnswer: string | null;
+    retrievedChunkIds: string[];
+    citedChunkIds: string[];
+    answerText: string | null;
+    abstained: boolean;
+    metrics: Record<string, unknown>;
+    latencyMs: Record<string, unknown>;
+    errorMessage: string | null;
+  }>;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, init);
   const json = (await response.json()) as ApiEnvelope<T>;
@@ -128,6 +162,44 @@ export const api = {
       pageEnd: number | null;
       document: { id: string; title: string; originalFilename: string };
     }>(`/v1/chunks/${id}`),
+
+  listBenchmarks: () =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        version: string;
+        description: string | null;
+        itemCount: number;
+        createdAt: string;
+        updatedAt: string;
+      }>
+    >('/v1/benchmarks'),
+
+  seedBenchmark: () =>
+    request<{
+      id: string;
+      name: string;
+      version: string;
+      items: unknown[];
+    }>('/v1/benchmarks/seed', { method: 'POST' }),
+
+  listEvalRuns: () => request<EvalRunSummary[]>('/v1/eval/runs'),
+
+  getEvalRun: (id: string) => request<EvalRunDetail>(`/v1/eval/runs/${id}`),
+
+  startEvalRun: (body?: {
+    benchmarkSetId?: string;
+    label?: string;
+    retrievalStrategy?: RetrievalStrategy;
+    rerankingEnabled?: boolean;
+    topK?: number;
+  }) =>
+    request<EvalRunDetail>('/v1/eval/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    }),
 };
 
 export function streamChatMessage(

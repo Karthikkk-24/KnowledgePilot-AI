@@ -1,0 +1,50 @@
+{
+  "id": "bench_smoke_v1",
+  "name": "Smoke Policies v1",
+  "version": "1.0.0",
+  "description": "Tiny golden set for Phase 3 CI and local demos",
+  "documents": [
+    {
+      "filename": "retention-policy.md",
+      "title": "Retention Policy"
+    },
+    {
+      "filename": "ops-runbook.md",
+      "title": "Ops Runbook"
+    }
+  ],
+  "items": [
+    {
+      "id": "q_retention",
+      "question": "What is the retention period for audit logs?",
+      "expectedAnswer": "Audit logs are retained for 7 years.",
+      "relevantPassages": ["Audit logs are retained for 7 years"],
+      "tags": ["policy", "retention"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "q_err4421",
+      "question": "What is ERR-4421 and what is the escalation window?",
+      "expectedAnswer": "Incident ERR-4421 requires escalation within 15 minutes.",
+      "relevantPassages": ["Incident ERR-4421 requires escalation within 15 minutes"],
+      "tags": ["ops", "exact-term"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "q_oncall",
+      "question": "Who owns weekend on-call coverage?",
+      "expectedAnswer": "The platform SRE rotation owns weekend on-call coverage.",
+      "relevantPassages": ["platform SRE rotation owns weekend on-call"],
+      "tags": ["ops"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "q_abstain",
+      "question": "What is the capital of Atlantis XYZ-999?",
+      "expectedAnswer": null,
+      "relevantPassages": [],
+      "tags": ["abstention"],
+      "difficulty": "easy"
+    }
+  ]
+}

@@ -24,7 +24,8 @@
     "db:generate": "pnpm --filter @knowledgepilot/db prisma:generate",
     "db:migrate": "pnpm --filter @knowledgepilot/db exec prisma migrate deploy",
     "db:migrate:dev": "pnpm --filter @knowledgepilot/db exec prisma migrate dev",
-    "db:deploy": "pnpm --filter @knowledgepilot/db exec prisma migrate deploy"
+    "db:deploy": "pnpm --filter @knowledgepilot/db exec prisma migrate deploy",
+    "eval:smoke": "node scripts/eval-smoke.mjs"
   },
 
 

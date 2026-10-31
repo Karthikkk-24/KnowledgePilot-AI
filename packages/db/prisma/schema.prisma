@@ -40,6 +40,16 @@ enum MessageRole {
   @@map("message_role")
 }
 
+enum EvalRunState {
+  queued
+  running
+  completed
+  failed
+  cancelled
+
+  @@map("eval_run_state")
+}
+
 model Tenant {
   id        String    @id @default(cuid())
   name      String
@@ -48,9 +58,11 @@ model Tenant {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  documents     Document[]
-  conversations Conversation[]
-  ingestionJobs IngestionJob[]
+  documents      Document[]
+  conversations  Conversation[]
+  ingestionJobs  IngestionJob[]
+  benchmarkSets  BenchmarkSet[]
+  evalRuns       EvalRun[]
 
   @@map("tenants")
 }
@@ -182,4 +194,98 @@ model Citation {
   @@index([messageId])
   @@index([tenantId, chunkId])
   @@map("citations")
+}
+
+model BenchmarkSet {
+  id          String   @id
+  tenantId    String   @map("tenant_id")
+  name        String
+  version     String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  items    BenchmarkItem[]
+  evalRuns EvalRun[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@map("benchmark_sets")
+}
+
+model BenchmarkItem {
+  id                  String   @id @default(cuid())
+  benchmarkSetId      String   @map("benchmark_set_id")
+  externalId          String   @map("external_id")
+  question            String
+  expectedAnswer      String?  @map("expected_answer")
+  relevantChunkIds    String[] @default([]) @map("relevant_chunk_ids")
+  relevantDocumentIds String[] @default([]) @map("relevant_document_ids")
+  relevantPassages    Json     @default("[]") @map("relevant_passages")
+  tags                String[] @default([])
+  difficulty          String?
+  ordinal             Int      @default(0)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  benchmarkSet BenchmarkSet     @relation(fields: [benchmarkSetId], references: [id], onDelete: Cascade)
+  results      EvalItemResult[]
+
+  @@unique([benchmarkSetId, externalId])
+  @@index([benchmarkSetId, ordinal])
+  @@map("benchmark_items")
+}
+
+model EvalRun {
+  id               String       @id @default(cuid())
+  tenantId         String       @map("tenant_id")
+  benchmarkSetId   String       @map("benchmark_set_id")
+  state            EvalRunState @default(queued)
+  label            String?
+  configSnapshot   Json         @map("config_snapshot")
+  progress         Int          @default(0)
+  itemCount        Int          @default(0) @map("item_count")
+  completedCount   Int          @default(0) @map("completed_count")
+  metricsSummary   Json?        @map("metrics_summary")
+  latencyMsTotal   Int?         @map("latency_ms_total")
+  estimatedCostUsd Float?       @map("estimated_cost_usd")
+  errorMessage     String?      @map("error_message")
+  bullJobId        String?      @map("bull_job_id")
+  startedAt        DateTime?    @map("started_at")
+  finishedAt       DateTime?    @map("finished_at")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  benchmarkSet BenchmarkSet     @relation(fields: [benchmarkSetId], references: [id], onDelete: Restrict)
+  itemResults  EvalItemResult[]
+
+  @@index([tenantId, createdAt])
+  @@index([benchmarkSetId, createdAt])
+  @@index([tenantId, state])
+  @@map("eval_runs")
+}
+
+model EvalItemResult {
+  id                String   @id @default(cuid())
+  evalRunId         String   @map("eval_run_id")
+  benchmarkItemId   String   @map("benchmark_item_id")
+  question          String
+  expectedAnswer    String?  @map("expected_answer")
+  retrievedChunkIds String[] @default([]) @map("retrieved_chunk_ids")
+  citedChunkIds     String[] @default([]) @map("cited_chunk_ids")
+  answerText        String?  @map("answer_text")
+  abstained         Boolean  @default(false)
+  metrics           Json     @default("{}")
+  latencyMs         Json     @default("{}") @map("latency_ms")
+  errorMessage      String?  @map("error_message")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  evalRun       EvalRun       @relation(fields: [evalRunId], references: [id], onDelete: Cascade)
+  benchmarkItem BenchmarkItem @relation(fields: [benchmarkItemId], references: [id], onDelete: Restrict)
+
+  @@unique([evalRunId, benchmarkItemId])
+  @@index([evalRunId])
+  @@map("eval_item_results")
 }

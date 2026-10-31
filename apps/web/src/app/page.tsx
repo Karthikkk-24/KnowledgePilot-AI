@@ -7,7 +7,7 @@ export default function HomePage() {
   return (
     <main style={{ maxWidth: 880, margin: '0 auto', padding: '2.5rem 1.5rem 4rem' }}>
       <p style={{ margin: 0, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.75rem', color: 'var(--muted)' }}>
-        Phase 2 · Hybrid retrieval
+        Phase 3 · Evaluation
       </p>
       <h1
         style={{
@@ -20,12 +20,12 @@ export default function HomePage() {
         {APP_NAME}
       </h1>
       <p style={{ margin: 0, color: 'var(--muted)', fontSize: '1.05rem', lineHeight: 1.6, maxWidth: 640 }}>
-        Upload documents, ask with hybrid search and filters, and get cited answers — or a clear
-        abstention when evidence is missing.
+        Upload documents, chat with hybrid retrieval, and run a seeded benchmark to store Recall@k,
+        MRR, faithfulness, and citation metrics.
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.75rem', flexWrap: 'wrap' }}>
         <Link
-          href="/documents"
+          href="/evaluation"
           style={{
             background: 'var(--accent)',
             color: '#fff',
@@ -34,7 +34,20 @@ export default function HomePage() {
             borderRadius: 10,
           }}
         >
-          Open document library
+          Open evaluation
+        </Link>
+        <Link
+          href="/documents"
+          style={{
+            border: '1px solid var(--line)',
+            color: 'var(--ink)',
+            textDecoration: 'none',
+            padding: '0.75rem 1.1rem',
+            borderRadius: 10,
+            background: 'var(--panel)',
+          }}
+        >
+          Documents
         </Link>
         <Link
           href="/chat"
@@ -47,7 +60,7 @@ export default function HomePage() {
             background: 'var(--panel)',
           }}
         >
-          Start chatting
+          Chat
         </Link>
       </div>
       <dl

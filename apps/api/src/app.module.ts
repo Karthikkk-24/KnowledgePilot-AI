@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { loadEnv } from '@knowledgepilot/config';
 import { ChatModule } from './modules/chat/chat.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { EvalModule } from './modules/eval/eval.module';
 import { HealthModule } from './modules/health/health.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { SourcesModule } from './modules/sources/sources.module';
@@ -21,6 +22,7 @@ const env = loadEnv();
     IngestionModule,
     ChatModule,
     SourcesModule,
+    EvalModule,
   ],
 })
 export class AppModule {}

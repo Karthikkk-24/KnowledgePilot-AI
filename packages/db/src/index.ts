@@ -1,4 +1,11 @@
-export { Prisma, PrismaClient, DocumentStatus, IngestionJobState, MessageRole } from '@prisma/client';
+export {
+  Prisma,
+  PrismaClient,
+  DocumentStatus,
+  IngestionJobState,
+  MessageRole,
+  EvalRunState,
+} from '@prisma/client';
 export type {
   Tenant,
   Document,
@@ -7,6 +14,10 @@ export type {
   Conversation,
   Message,
   Citation,
+  BenchmarkSet,
+  BenchmarkItem,
+  EvalRun,
+  EvalItemResult,
 } from '@prisma/client';
 export { createDbClient, disconnectDbClient, type DbClient } from './client';
 export { STUB_TENANT_ID, STUB_TENANT_SLUG, ensureStubTenant } from './stub-tenant';

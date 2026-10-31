@@ -47,3 +47,20 @@ export {
   normalizeMetadataFilters,
   type MetadataFilters,
 } from './retrieval/metadata-filters';
+export {
+  averageMetrics,
+  citationCorrectness,
+  computeItemMetrics,
+  estimateCostUsd,
+  faithfulnessHeuristic,
+  meanReciprocalRank,
+  ndcgAtK,
+  recallAtK,
+  type CitationCorrectness,
+  type CostEstimateInput,
+  type ItemMetrics,
+} from './evaluation/metrics';
+export {
+  resolveRelevantChunkIds,
+  type PassageChunk,
+} from './evaluation/resolve-relevant-chunks';
