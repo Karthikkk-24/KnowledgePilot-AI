@@ -14,15 +14,14 @@ import {
   DocumentStatus,
   EvalRunState,
   IngestionJobState,
-  STUB_TENANT_ID,
-} from '@knowledgepilot/db';
+  } from '@knowledgepilot/db';
 import {
   defaultPipelineConfig,
   resolveRelevantChunkIds,
   type PipelineConfig,
   type RetrievalStrategy,
 } from '@knowledgepilot/rag';
-import { createLocalBlobStorage } from '../../adapters/local-storage';
+import { createBlobStorage } from '../../adapters/storage.factory';
 import { INGESTION_QUEUE, type IngestionJobPayload } from '../ingestion/ingestion.constants';
 import { EVAL_QUEUE, SMOKE_BENCHMARK_ID, type EvalJobPayload } from './eval.constants';
 import { loadSmokeBenchmarkFixture } from './eval.fixture';
@@ -102,16 +101,16 @@ export type EvalRunDetailDto = EvalRunDto & {
 export class EvalService {
   private readonly db = createDbClient();
   private readonly env = loadEnv();
-  private readonly storage = createLocalBlobStorage(this.env.STORAGE_LOCAL_PATH);
+  private readonly storage = createBlobStorage(this.env);
 
   constructor(
     @InjectQueue(EVAL_QUEUE) private readonly evalQueue: Queue,
     @InjectQueue(INGESTION_QUEUE) private readonly ingestionQueue: Queue,
   ) {}
 
-  async listBenchmarks(): Promise<BenchmarkListItem[]> {
+  async listBenchmarks(tenantId: string): Promise<BenchmarkListItem[]> {
     const rows = await this.db.benchmarkSet.findMany({
-      where: { tenantId: STUB_TENANT_ID },
+      where: { tenantId: tenantId },
       include: { _count: { select: { items: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -126,9 +125,9 @@ export class EvalService {
     }));
   }
 
-  async getBenchmark(id: string): Promise<BenchmarkDetail> {
+  async getBenchmark(tenantId: string, id: string): Promise<BenchmarkDetail> {
     const set = await this.db.benchmarkSet.findFirst({
-      where: { id, tenantId: STUB_TENANT_ID },
+      where: { id, tenantId: tenantId },
       include: { items: { orderBy: { ordinal: 'asc' } } },
     });
     if (!set) throw new NotFoundException('Benchmark set not found');
@@ -152,7 +151,7 @@ export class EvalService {
     };
   }
 
-  async seedSmokeBenchmark(): Promise<BenchmarkDetail> {
+  async seedSmokeBenchmark(tenantId: string): Promise<BenchmarkDetail> {
     const { dir, fixture } = loadSmokeBenchmarkFixture();
     const documentIds: string[] = [];
 
@@ -161,25 +160,25 @@ export class EvalService {
       const buffer = readFileSync(filePath);
       const contentHash = createHash('sha256').update(buffer).digest('hex');
       const existing = await this.db.document.findFirst({
-        where: { tenantId: STUB_TENANT_ID, contentHash, deletedAt: null },
+        where: { tenantId: tenantId, contentHash, deletedAt: null },
       });
 
       if (existing) {
         if (existing.status !== DocumentStatus.ready) {
-          await this.enqueueIngestion(existing.id);
-          await this.waitForDocumentReady(existing.id);
+          await this.enqueueIngestion(tenantId, existing.id);
+          await this.waitForDocumentReady(tenantId, existing.id);
         }
         documentIds.push(existing.id);
         continue;
       }
 
       const shortId = randomUUID().replace(/-/g, '').slice(0, 24);
-      const storageKey = `${STUB_TENANT_ID}/${shortId}/${docMeta.filename}`;
+      const storageKey = `${tenantId}/${shortId}/${docMeta.filename}`;
       await this.storage.save({ key: storageKey, body: buffer });
       const document = await this.db.document.create({
         data: {
           id: `doc_${shortId}`,
-          tenantId: STUB_TENANT_ID,
+          tenantId: tenantId,
           title: docMeta.title,
           originalFilename: docMeta.filename,
           mimeType: 'text/markdown',
@@ -189,13 +188,13 @@ export class EvalService {
           status: DocumentStatus.queued,
         },
       });
-      await this.enqueueIngestion(document.id);
-      await this.waitForDocumentReady(document.id);
+      await this.enqueueIngestion(tenantId, document.id);
+      await this.waitForDocumentReady(tenantId, document.id);
       documentIds.push(document.id);
     }
 
     const chunks = await this.db.chunk.findMany({
-      where: { tenantId: STUB_TENANT_ID, documentId: { in: documentIds } },
+      where: { tenantId: tenantId, documentId: { in: documentIds } },
       select: { id: true, documentId: true, content: true },
     });
 
@@ -203,7 +202,7 @@ export class EvalService {
       where: { id: fixture.id },
       create: {
         id: fixture.id,
-        tenantId: STUB_TENANT_ID,
+        tenantId: tenantId,
         name: fixture.name,
         version: fixture.version,
         description: fixture.description,
@@ -258,12 +257,12 @@ export class EvalService {
       ordinal += 1;
     }
 
-    return this.getBenchmark(fixture.id);
+    return this.getBenchmark(tenantId, fixture.id);
   }
 
-  async listRuns(): Promise<EvalRunDto[]> {
+  async listRuns(tenantId: string): Promise<EvalRunDto[]> {
     const rows = await this.db.evalRun.findMany({
-      where: { tenantId: STUB_TENANT_ID },
+      where: { tenantId: tenantId },
       include: { benchmarkSet: { select: { id: true, name: true, version: true } } },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -287,9 +286,9 @@ export class EvalService {
     }));
   }
 
-  async getRun(id: string): Promise<EvalRunDetailDto> {
+  async getRun(tenantId: string, id: string): Promise<EvalRunDetailDto> {
     const run = await this.db.evalRun.findFirst({
-      where: { id, tenantId: STUB_TENANT_ID },
+      where: { id, tenantId: tenantId },
       include: {
         benchmarkSet: { select: { id: true, name: true, version: true } },
         itemResults: { orderBy: { createdAt: 'asc' } },
@@ -328,16 +327,16 @@ export class EvalService {
     };
   }
 
-  async startRun(input: StartEvalInput = {}): Promise<EvalRunDetailDto> {
+  async startRun(tenantId: string, input: StartEvalInput = {}): Promise<EvalRunDetailDto> {
     const benchmarkSetId = input.benchmarkSetId ?? SMOKE_BENCHMARK_ID;
     let set = await this.db.benchmarkSet.findFirst({
-      where: { id: benchmarkSetId, tenantId: STUB_TENANT_ID },
+      where: { id: benchmarkSetId, tenantId: tenantId },
       include: { items: true },
     });
     if (!set) {
-      await this.seedSmokeBenchmark();
+      await this.seedSmokeBenchmark(tenantId);
       set = await this.db.benchmarkSet.findFirst({
-        where: { id: benchmarkSetId, tenantId: STUB_TENANT_ID },
+        where: { id: benchmarkSetId, tenantId: tenantId },
         include: { items: true },
       });
     }
@@ -360,7 +359,7 @@ export class EvalService {
 
     const run = await this.db.evalRun.create({
       data: {
-        tenantId: STUB_TENANT_ID,
+        tenantId: tenantId,
         benchmarkSetId: set.id,
         state: EvalRunState.queued,
         label: input.label ?? null,
@@ -371,7 +370,7 @@ export class EvalService {
       },
     });
 
-    const payload: EvalJobPayload = { tenantId: STUB_TENANT_ID, evalRunId: run.id };
+    const payload: EvalJobPayload = { tenantId: tenantId, evalRunId: run.id };
     const bullJob = await this.evalQueue.add('run', payload, {
       attempts: 1,
       removeOnComplete: 50,
@@ -382,26 +381,26 @@ export class EvalService {
       data: { bullJobId: String(bullJob.id) },
     });
 
-    return this.getRun(run.id);
+    return this.getRun(tenantId, run.id);
   }
 
-  private async enqueueIngestion(documentId: string) {
+  private async enqueueIngestion(tenantId: string, documentId: string) {
     const job = await this.db.ingestionJob.create({
       data: {
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         documentId,
         state: IngestionJobState.queued,
         progress: 0,
       },
     });
     const payload: IngestionJobPayload = {
-      tenantId: STUB_TENANT_ID,
+      tenantId,
       documentId,
       ingestionJobId: job.id,
     };
     const bullJob = await this.ingestionQueue.add('ingest', payload, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
+      attempts: this.env.INGESTION_MAX_ATTEMPTS,
+      backoff: { type: 'exponential', delay: this.env.INGESTION_BACKOFF_MS },
       removeOnComplete: 50,
       removeOnFail: 100,
     });
@@ -411,11 +410,11 @@ export class EvalService {
     });
   }
 
-  private async waitForDocumentReady(documentId: string, timeoutMs = 60_000) {
+  private async waitForDocumentReady(tenantId: string, documentId: string, timeoutMs = 60_000) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const doc = await this.db.document.findFirst({
-        where: { id: documentId, tenantId: STUB_TENANT_ID },
+        where: { id: documentId, tenantId },
       });
       if (!doc) throw new Error(`Document ${documentId} missing during seed`);
       if (doc.status === DocumentStatus.ready) return;

@@ -10,10 +10,9 @@ import {
   createDbClient,
   DocumentStatus,
   IngestionJobState,
-  STUB_TENANT_ID,
 } from '@knowledgepilot/db';
 import { loadEnv } from '@knowledgepilot/config';
-import { createLocalBlobStorage } from '../../adapters/local-storage';
+import { createBlobStorage } from '../../adapters/storage.factory';
 import { INGESTION_QUEUE, type IngestionJobPayload } from '../ingestion/ingestion.constants';
 
 const ALLOWED_MIME = new Set([
@@ -42,7 +41,7 @@ export type DocumentDto = {
 export class DocumentsService {
   private readonly db = createDbClient();
   private readonly env = loadEnv();
-  private readonly storage = createLocalBlobStorage(this.env.STORAGE_LOCAL_PATH);
+  private readonly storage = createBlobStorage(this.env);
 
   constructor(@InjectQueue(INGESTION_QUEUE) private readonly ingestionQueue: Queue) {}
 
@@ -69,26 +68,30 @@ export class DocumentsService {
     }
   }
 
-  async list(): Promise<DocumentDto[]> {
+  async list(tenantId: string): Promise<DocumentDto[]> {
     const docs = await this.db.document.findMany({
-      where: { tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { tenantId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
     return docs.map((doc) => this.toDto(doc));
   }
 
-  async get(id: string): Promise<
+  async get(
+    tenantId: string,
+    id: string,
+  ): Promise<
     DocumentDto & {
       latestJob: {
         id: string;
         state: string;
         progress: number;
         lastError: string | null;
+        attempt: number;
       } | null;
     }
   > {
     const doc = await this.db.document.findFirst({
-      where: { id, tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { id, tenantId, deletedAt: null },
       include: {
         ingestionJobs: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
@@ -104,12 +107,16 @@ export class DocumentsService {
             state: doc.ingestionJobs[0].state,
             progress: doc.ingestionJobs[0].progress,
             lastError: doc.ingestionJobs[0].lastError,
+            attempt: doc.ingestionJobs[0].attempt,
           }
         : null,
     };
   }
 
-  async upload(file: Express.Multer.File): Promise<DocumentDto & { deduplicated: boolean }> {
+  async upload(
+    tenantId: string,
+    file: Express.Multer.File,
+  ): Promise<DocumentDto & { deduplicated: boolean }> {
     if (!file) {
       throw new BadRequestException('file is required');
     }
@@ -118,21 +125,21 @@ export class DocumentsService {
 
     const contentHash = createHash('sha256').update(file.buffer).digest('hex');
     const existing = await this.db.document.findFirst({
-      where: { tenantId: STUB_TENANT_ID, contentHash, deletedAt: null },
+      where: { tenantId, contentHash, deletedAt: null },
     });
     if (existing) {
       return { ...this.toDto(existing), deduplicated: true };
     }
 
     const documentId = randomUUID().replace(/-/g, '').slice(0, 24);
-    const storageKey = `${STUB_TENANT_ID}/${documentId}/${file.originalname}`;
+    const storageKey = `${tenantId}/${documentId}/${file.originalname}`;
     await this.storage.save({ key: storageKey, body: file.buffer });
 
     const title = file.originalname.replace(/\.[^.]+$/, '') || file.originalname;
     const document = await this.db.document.create({
       data: {
         id: `doc_${documentId}`,
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         title,
         originalFilename: file.originalname,
         mimeType,
@@ -143,13 +150,13 @@ export class DocumentsService {
       },
     });
 
-    await this.enqueueIngestion(document.id);
+    await this.enqueueIngestion(tenantId, document.id);
     return { ...this.toDto(document), deduplicated: false };
   }
 
-  async softDelete(id: string) {
+  async softDelete(tenantId: string, id: string) {
     const doc = await this.db.document.findFirst({
-      where: { id, tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { id, tenantId, deletedAt: null },
     });
     if (!doc) {
       throw new NotFoundException('Document not found');
@@ -161,18 +168,9 @@ export class DocumentsService {
     return { id, deleted: true };
   }
 
-  async retryIngestion(id: string): Promise<
-    DocumentDto & {
-      latestJob: {
-        id: string;
-        state: string;
-        progress: number;
-        lastError: string | null;
-      } | null;
-    }
-  > {
+  async retryIngestion(tenantId: string, id: string) {
     const doc = await this.db.document.findFirst({
-      where: { id, tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { id, tenantId, deletedAt: null },
     });
     if (!doc) {
       throw new NotFoundException('Document not found');
@@ -181,14 +179,14 @@ export class DocumentsService {
       where: { id },
       data: { status: DocumentStatus.queued, errorMessage: null },
     });
-    await this.enqueueIngestion(id);
-    return this.get(id);
+    await this.enqueueIngestion(tenantId, id);
+    return this.get(tenantId, id);
   }
 
-  private async enqueueIngestion(documentId: string) {
+  private async enqueueIngestion(tenantId: string, documentId: string) {
     const job = await this.db.ingestionJob.create({
       data: {
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         documentId,
         state: IngestionJobState.queued,
         progress: 0,
@@ -196,14 +194,14 @@ export class DocumentsService {
     });
 
     const payload: IngestionJobPayload = {
-      tenantId: STUB_TENANT_ID,
+      tenantId,
       documentId,
       ingestionJobId: job.id,
     };
 
     const bullJob = await this.ingestionQueue.add('ingest', payload, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
+      attempts: this.env.INGESTION_MAX_ATTEMPTS,
+      backoff: { type: 'exponential', delay: this.env.INGESTION_BACKOFF_MS },
       removeOnComplete: 50,
       removeOnFail: 100,
     });

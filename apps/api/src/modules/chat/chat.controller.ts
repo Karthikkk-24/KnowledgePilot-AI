@@ -1,8 +1,18 @@
-import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
+import { MembershipRole } from '@knowledgepilot/db';
 import type { MetadataFilters, RetrievalStrategy } from '@knowledgepilot/rag';
+import { loadEnv } from '@knowledgepilot/config';
+import { AuthGuard } from '../../auth/auth.guard';
+import { CurrentAuth } from '../../auth/current-auth.decorator';
+import { MinRole } from '../../auth/roles.decorator';
+import { RolesGuard } from '../../auth/roles.guard';
+import type { AuthPrincipal } from '../../auth/auth.types';
 import { ok } from '../../common/http';
 import { ChatService } from './chat.service';
+
+const env = loadEnv();
 
 type PostMessageBody = {
   content?: string;
@@ -13,26 +23,31 @@ type PostMessageBody = {
 };
 
 @Controller('conversations')
+@UseGuards(AuthGuard, RolesGuard)
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Get()
-  async list() {
-    return ok(await this.chatService.listConversations());
+  async list(@CurrentAuth() auth: AuthPrincipal) {
+    return ok(await this.chatService.listConversations(auth.tenantId));
   }
 
   @Post()
-  async create(@Body() body: { title?: string }) {
-    return ok(await this.chatService.createConversation(body?.title));
+  @MinRole(MembershipRole.member)
+  async create(@CurrentAuth() auth: AuthPrincipal, @Body() body: { title?: string }) {
+    return ok(await this.chatService.createConversation(auth.tenantId, body?.title));
   }
 
   @Get(':id')
-  async get(@Param('id') id: string): Promise<ReturnType<typeof ok>> {
-    return ok(await this.chatService.getConversation(id));
+  async get(@CurrentAuth() auth: AuthPrincipal, @Param('id') id: string): Promise<ReturnType<typeof ok>> {
+    return ok(await this.chatService.getConversation(auth.tenantId, id));
   }
 
   @Post(':id/messages')
+  @MinRole(MembershipRole.member)
+  @Throttle({ default: { limit: env.RATE_LIMIT_CHAT_LIMIT, ttl: env.RATE_LIMIT_TTL_MS } })
   async postMessage(
+    @CurrentAuth() auth: AuthPrincipal,
     @Param('id') id: string,
     @Body() body: PostMessageBody,
     @Res() res: Response,
@@ -42,7 +57,7 @@ export class ChatController {
       res.status(400).json({
         data: null,
         error: { code: 'BAD_REQUEST', message: 'content is required', details: {} },
-        meta: { requestId: 'chat' },
+        meta: { requestId: auth.requestId },
       });
       return;
     }
@@ -56,7 +71,7 @@ export class ChatController {
           message: 'retrievalStrategy must be vector, keyword, or hybrid',
           details: {},
         },
-        meta: { requestId: 'chat' },
+        meta: { requestId: auth.requestId },
       });
       return;
     }
@@ -64,6 +79,7 @@ export class ChatController {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('x-request-id', auth.requestId);
     res.flushHeaders?.();
 
     const write = (event: string, data: unknown) => {
@@ -72,7 +88,7 @@ export class ChatController {
     };
 
     try {
-      for await (const event of this.chatService.streamMessage(id, content, {
+      for await (const event of this.chatService.streamMessage(auth.tenantId, id, content, {
         retrievalStrategy: body.retrievalStrategy,
         rerankingEnabled: body.rerankingEnabled,
         topK: body.topK,

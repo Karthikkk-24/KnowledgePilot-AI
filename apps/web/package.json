@@ -12,6 +12,7 @@
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.20",
     "@knowledgepilot/shared": "workspace:*",
     "next": "^15.3.3",
     "react": "^19.1.0",

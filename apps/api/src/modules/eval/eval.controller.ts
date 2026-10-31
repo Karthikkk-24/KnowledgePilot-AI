@@ -1,5 +1,11 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { MembershipRole } from '@knowledgepilot/db';
 import type { RetrievalStrategy } from '@knowledgepilot/rag';
+import { AuthGuard } from '../../auth/auth.guard';
+import { CurrentAuth } from '../../auth/current-auth.decorator';
+import { MinRole } from '../../auth/roles.decorator';
+import { RolesGuard } from '../../auth/roles.guard';
+import type { AuthPrincipal } from '../../auth/auth.types';
 import { ok } from '../../common/http';
 import {
   EvalService,
@@ -10,36 +16,48 @@ import {
 } from './eval.service';
 
 @Controller()
+@UseGuards(AuthGuard, RolesGuard)
 export class EvalController {
   constructor(private readonly evalService: EvalService) {}
 
   @Get('benchmarks')
-  async listBenchmarks(): Promise<ReturnType<typeof ok<BenchmarkListItem[]>>> {
-    return ok(await this.evalService.listBenchmarks());
+  async listBenchmarks(
+    @CurrentAuth() auth: AuthPrincipal,
+  ): Promise<ReturnType<typeof ok<BenchmarkListItem[]>>> {
+    return ok(await this.evalService.listBenchmarks(auth.tenantId));
   }
 
   @Get('benchmarks/:id')
-  async getBenchmark(@Param('id') id: string): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
-    return ok(await this.evalService.getBenchmark(id));
+  async getBenchmark(
+    @CurrentAuth() auth: AuthPrincipal,
+    @Param('id') id: string,
+  ): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
+    return ok(await this.evalService.getBenchmark(auth.tenantId, id));
   }
 
   @Post('benchmarks/seed')
-  async seed(): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
-    return ok(await this.evalService.seedSmokeBenchmark());
+  @MinRole(MembershipRole.admin)
+  async seed(@CurrentAuth() auth: AuthPrincipal): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
+    return ok(await this.evalService.seedSmokeBenchmark(auth.tenantId));
   }
 
   @Get('eval/runs')
-  async listRuns(): Promise<ReturnType<typeof ok<EvalRunDto[]>>> {
-    return ok(await this.evalService.listRuns());
+  async listRuns(@CurrentAuth() auth: AuthPrincipal): Promise<ReturnType<typeof ok<EvalRunDto[]>>> {
+    return ok(await this.evalService.listRuns(auth.tenantId));
   }
 
   @Get('eval/runs/:id')
-  async getRun(@Param('id') id: string): Promise<ReturnType<typeof ok<EvalRunDetailDto>>> {
-    return ok(await this.evalService.getRun(id));
+  async getRun(
+    @CurrentAuth() auth: AuthPrincipal,
+    @Param('id') id: string,
+  ): Promise<ReturnType<typeof ok<EvalRunDetailDto>>> {
+    return ok(await this.evalService.getRun(auth.tenantId, id));
   }
 
   @Post('eval/runs')
+  @MinRole(MembershipRole.member)
   async startRun(
+    @CurrentAuth() auth: AuthPrincipal,
     @Body()
     body: {
       benchmarkSetId?: string;
@@ -50,7 +68,7 @@ export class EvalController {
     },
   ): Promise<ReturnType<typeof ok<EvalRunDetailDto>>> {
     return ok(
-      await this.evalService.startRun({
+      await this.evalService.startRun(auth.tenantId, {
         benchmarkSetId: body?.benchmarkSetId,
         label: body?.label,
         retrievalStrategy: body?.retrievalStrategy,

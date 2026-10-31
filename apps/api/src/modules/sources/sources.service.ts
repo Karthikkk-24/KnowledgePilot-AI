@@ -1,15 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { createDbClient, STUB_TENANT_ID } from '@knowledgepilot/db';
+import { createDbClient } from '@knowledgepilot/db';
 
 @Injectable()
 export class SourcesService {
   private readonly db = createDbClient();
 
-  async getChunk(chunkId: string) {
+  async getChunk(tenantId: string, chunkId: string) {
     const chunk = await this.db.chunk.findFirst({
       where: {
         id: chunkId,
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         document: { deletedAt: null },
       },
       include: {

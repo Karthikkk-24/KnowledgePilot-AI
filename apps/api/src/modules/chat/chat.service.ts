@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { loadEnv } from '@knowledgepilot/config';
-import { createDbClient, MessageRole, STUB_TENANT_ID } from '@knowledgepilot/db';
+import { createDbClient, MessageRole } from '@knowledgepilot/db';
 import {
   createRagOrchestrator,
   defaultPipelineConfig,
@@ -42,9 +42,9 @@ export class ChatService {
     abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
   });
 
-  async listConversations() {
+  async listConversations(tenantId: string) {
     const rows = await this.db.conversation.findMany({
-      where: { tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { tenantId, deletedAt: null },
       orderBy: { updatedAt: 'desc' },
     });
     return rows.map((row) => ({
@@ -55,10 +55,10 @@ export class ChatService {
     }));
   }
 
-  async createConversation(title?: string) {
+  async createConversation(tenantId: string, title?: string) {
     const row = await this.db.conversation.create({
       data: {
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         title: title?.trim() || 'New chat',
       },
     });
@@ -70,7 +70,7 @@ export class ChatService {
     };
   }
 
-  async getConversation(id: string): Promise<{
+  async getConversation(tenantId: string, id: string): Promise<{
     id: string;
     title: string | null;
     createdAt: string;
@@ -90,7 +90,7 @@ export class ChatService {
     }>;
   }> {
     const conversation = await this.db.conversation.findFirst({
-      where: { id, tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { id, tenantId, deletedAt: null },
       include: {
         messages: {
           orderBy: { createdAt: 'asc' },
@@ -139,12 +139,13 @@ export class ChatService {
   }
 
   async *streamMessage(
+    tenantId: string,
     conversationId: string,
     content: string,
     options?: ChatMessageOptions,
   ): AsyncGenerator<StreamEvent & { userMessageId?: string; assistantMessageId?: string }> {
     const conversation = await this.db.conversation.findFirst({
-      where: { id: conversationId, tenantId: STUB_TENANT_ID, deletedAt: null },
+      where: { id: conversationId, tenantId, deletedAt: null },
     });
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
@@ -152,7 +153,7 @@ export class ChatService {
 
     const userMessage = await this.db.message.create({
       data: {
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         conversationId,
         role: MessageRole.user,
         content: content.trim(),
@@ -171,7 +172,7 @@ export class ChatService {
 
     let finalPayload: AnswerPayload | null = null;
     for await (const event of this.rag.answerStream({
-      tenantId: STUB_TENANT_ID,
+      tenantId,
       query: content.trim(),
       config,
       filters,
@@ -200,14 +201,14 @@ export class ChatService {
 
     const assistant = await this.db.message.create({
       data: {
-        tenantId: STUB_TENANT_ID,
+        tenantId,
         conversationId,
         role: MessageRole.assistant,
         content: finalPayload.text,
         abstained: finalPayload.abstained,
         citations: {
           create: finalPayload.citations.map((citation) => ({
-            tenantId: STUB_TENANT_ID,
+            tenantId,
             chunkId: citation.chunkId,
             documentId: citation.documentId,
             quote: citation.quote,
