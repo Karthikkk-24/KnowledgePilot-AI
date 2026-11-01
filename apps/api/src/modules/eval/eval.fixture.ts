@@ -17,19 +17,23 @@ export type SmokeBenchmarkFixture = {
   }>;
 };
 
-export function resolveSmokeFixtureDir(): string {
+function resolveFixtureDir(slug: string): string {
   const candidates = [
-    path.resolve(process.cwd(), 'fixtures/eval/smoke-v1'),
-    path.resolve(process.cwd(), '../../fixtures/eval/smoke-v1'),
-    path.resolve(__dirname, '../../../../../fixtures/eval/smoke-v1'),
-    path.resolve(__dirname, '../../../../../../fixtures/eval/smoke-v1'),
+    path.resolve(process.cwd(), `fixtures/eval/${slug}`),
+    path.resolve(process.cwd(), `../../fixtures/eval/${slug}`),
+    path.resolve(__dirname, `../../../../../fixtures/eval/${slug}`),
+    path.resolve(__dirname, `../../../../../../fixtures/eval/${slug}`),
   ];
   for (const candidate of candidates) {
     if (existsSync(path.join(candidate, 'benchmark.json'))) {
       return candidate;
     }
   }
-  throw new Error('Could not locate fixtures/eval/smoke-v1/benchmark.json');
+  throw new Error(`Could not locate fixtures/eval/${slug}/benchmark.json`);
+}
+
+export function resolveSmokeFixtureDir(): string {
+  return resolveFixtureDir('smoke-v1');
 }
 
 export function loadSmokeBenchmarkFixture(): {
@@ -37,6 +41,17 @@ export function loadSmokeBenchmarkFixture(): {
   fixture: SmokeBenchmarkFixture;
 } {
   const dir = resolveSmokeFixtureDir();
+  const fixture = JSON.parse(
+    readFileSync(path.join(dir, 'benchmark.json'), 'utf8'),
+  ) as SmokeBenchmarkFixture;
+  return { dir, fixture };
+}
+
+export function loadMultihopBenchmarkFixture(): {
+  dir: string;
+  fixture: SmokeBenchmarkFixture;
+} {
+  const dir = resolveFixtureDir('multihop-v1');
   const fixture = JSON.parse(
     readFileSync(path.join(dir, 'benchmark.json'), 'utf8'),
   ) as SmokeBenchmarkFixture;

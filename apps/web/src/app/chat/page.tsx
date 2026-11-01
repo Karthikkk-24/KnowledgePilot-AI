@@ -5,8 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   api,
   streamChatMessage,
+  type AgentTraceStep,
   type AnswerDiagnostics,
   type AnswerCitation,
+  type ChatMode,
   type RetrievalStrategy,
 } from '../../lib/api';
 
@@ -18,6 +20,7 @@ type ChatMessage = {
   abstentionReason?: string;
   citations?: AnswerCitation[];
   diagnostics?: AnswerDiagnostics;
+  agentSteps?: AgentTraceStep[];
 };
 
 const STRATEGY_OPTIONS: Array<{ value: RetrievalStrategy; label: string }> = [
@@ -34,19 +37,24 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<RetrievalStrategy>('hybrid');
   const [rerankingEnabled, setRerankingEnabled] = useState(false);
+  const [mode, setMode] = useState<ChatMode>('rag');
+  const [agentEnabled, setAgentEnabled] = useState(false);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [documents, setDocuments] = useState<
     Array<{ id: string; title: string; mimeType: string; status: string }>
   >([]);
   const [liveDiagnostics, setLiveDiagnostics] = useState<AnswerDiagnostics | null>(null);
+  const [liveAgentSteps, setLiveAgentSteps] = useState<AgentTraceStep[]>([]);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [existing, docs] = await Promise.all([
+        const [existing, docs, agentStatus] = await Promise.all([
           api.listConversations(),
           api.listDocuments(),
+          api.getAgentStatus().catch(() => ({ enabled: false, maxSteps: 5, timeoutMs: 30_000 })),
         ]);
+        setAgentEnabled(agentStatus.enabled);
         setDocuments(
           docs
             .filter((d) => d.status === 'ready')
@@ -66,6 +74,7 @@ export default function ChatPage() {
               if (m.role !== 'user' && m.role !== 'assistant') {
                 return [];
               }
+              const diagnostics = m.diagnostics as AnswerDiagnostics | null | undefined;
               return [
                 {
                   id: m.id,
@@ -73,6 +82,8 @@ export default function ChatPage() {
                   content: m.content,
                   abstained: m.abstained,
                   citations: m.citations,
+                  diagnostics: diagnostics ?? undefined,
+                  agentSteps: diagnostics?.agentSteps,
                 } satisfies ChatMessage,
               ];
             }),
@@ -102,16 +113,18 @@ export default function ChatPage() {
     setError(null);
     setStreaming(true);
     setLiveDiagnostics(null);
+    setLiveAgentSteps([]);
 
     const userId = `local-user-${Date.now()}`;
     const assistantId = `local-assistant-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
       { id: userId, role: 'user', content: question },
-      { id: assistantId, role: 'assistant', content: '', citations: [] },
+      { id: assistantId, role: 'assistant', content: '', citations: [], agentSteps: [] },
     ]);
 
     let assembled = '';
+    const steps: AgentTraceStep[] = [];
 
     try {
       await streamChatMessage(
@@ -128,8 +141,19 @@ export default function ChatPage() {
             // citations arrive again on done with full payload
           },
           onDiagnostics: (diagnostics) => setLiveDiagnostics(diagnostics),
+          onAgentStep: (step) => {
+            steps.push(step);
+            setLiveAgentSteps([...steps]);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, agentSteps: [...steps] } : m,
+              ),
+            );
+          },
           onDone: (payload) => {
             setLiveDiagnostics(payload.diagnostics);
+            const agentSteps = payload.diagnostics.agentSteps ?? steps;
+            setLiveAgentSteps(agentSteps);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
@@ -140,6 +164,7 @@ export default function ChatPage() {
                       abstentionReason: payload.abstentionReason,
                       citations: payload.citations,
                       diagnostics: payload.diagnostics,
+                      agentSteps,
                     }
                   : m,
               ),
@@ -150,6 +175,7 @@ export default function ChatPage() {
         {
           retrievalStrategy: strategy,
           rerankingEnabled,
+          mode: agentEnabled ? mode : 'rag',
           filters:
             selectedDocIds.length > 0 ? { documentIds: selectedDocIds } : undefined,
         },
@@ -175,8 +201,8 @@ export default function ChatPage() {
       <div>
         <h1 style={{ fontFamily: 'var(--font-display)', margin: 0 }}>Chat</h1>
         <p style={{ color: 'var(--muted)', margin: '0.4rem 0 0' }}>
-          Hybrid retrieval by default. Try an exact error code with hybrid vs vector, or a nonsense
-          question to see abstention.
+          Single-shot RAG by default. Enable agent mode (FF_AGENTIC_RAG) for tool-traced multi-hop
+          retrieval with the same citation rules.
         </p>
       </div>
 
@@ -227,6 +253,29 @@ export default function ChatPage() {
             />
             Rerank candidates
           </label>
+
+          <label style={{ display: 'grid', gap: 4, fontSize: '0.85rem' }}>
+            <span style={{ color: 'var(--muted)' }}>Answer mode</span>
+            <select
+              value={mode}
+              disabled={!agentEnabled}
+              onChange={(e) => setMode(e.target.value as ChatMode)}
+              style={{
+                borderRadius: 10,
+                border: '1px solid var(--line)',
+                padding: '0.55rem 0.7rem',
+                background: '#fff',
+              }}
+            >
+              <option value="rag">Single-shot RAG</option>
+              <option value="agent">Agentic (tools)</option>
+            </select>
+          </label>
+          {!agentEnabled ? (
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)', paddingBottom: 6 }}>
+              Set FF_AGENTIC_RAG=true to unlock agent mode
+            </span>
+          ) : null}
         </div>
 
         {documents.length > 0 ? (
@@ -257,6 +306,25 @@ export default function ChatPage() {
                 );
               })}
             </div>
+          </div>
+        ) : null}
+
+        {liveAgentSteps.length > 0 ? (
+          <div style={{ fontSize: '0.85rem' }}>
+            <div style={{ color: 'var(--muted)', marginBottom: 6 }}>Agent tool trace</div>
+            <ol style={{ margin: 0, paddingLeft: '1.2rem', display: 'grid', gap: 6 }}>
+              {liveAgentSteps.map((step) => (
+                <li key={`${step.step}-${step.tool}`}>
+                  <strong>
+                    #{step.step} {step.tool}
+                  </strong>
+                  {step.thought ? ` — ${step.thought}` : ''}
+                  <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+                    {step.resultSummary} · {step.latencyMs}ms
+                  </div>
+                </li>
+              ))}
+            </ol>
           </div>
         ) : null}
 
@@ -310,11 +378,24 @@ export default function ChatPage() {
               <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: 4 }}>
                 {message.role}
                 {message.abstained ? ' · insufficient evidence' : ''}
+                {message.diagnostics?.agentMode ? ' · agent' : ''}
                 {message.diagnostics?.retrievalStrategy
                   ? ` · ${message.diagnostics.retrievalStrategy}`
                   : ''}
                 {message.diagnostics?.rerankingEnabled ? ' · reranked' : ''}
               </div>
+              {message.agentSteps && message.agentSteps.length > 0 ? (
+                <details style={{ fontSize: '0.78rem', marginBottom: 8 }}>
+                  <summary>Tool trace ({message.agentSteps.length})</summary>
+                  <ol style={{ margin: '0.35rem 0 0', paddingLeft: '1.1rem' }}>
+                    {message.agentSteps.map((step) => (
+                      <li key={`${message.id}-${step.step}`}>
+                        {step.tool}: {step.resultSummary}
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              ) : null}
               {message.abstained ? (
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>Could not answer from documents</div>
               ) : null}

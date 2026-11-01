@@ -1,36 +1,50 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { loadEnv } from '@knowledgepilot/config';
-import { createDbClient, MessageRole } from '@knowledgepilot/db';
+import { createDbClient, MessageRole, type Prisma } from '@knowledgepilot/db';
 import {
+  createAgentLoop,
   createRagOrchestrator,
   defaultPipelineConfig,
   normalizeMetadataFilters,
+  type AgentStreamEvent,
   type AnswerPayload,
   type MetadataFilters,
   type RetrievalStrategy,
   type StreamEvent,
 } from '@knowledgepilot/rag';
+import { createTenantAgentKnowledge } from '../../adapters/agent-knowledge.factory';
 import { createEmbedder, createLlmClient, createReranker } from '../../adapters/ai.factory';
 import { createPrismaChunkRepository } from '../../adapters/prisma-chunk.repository';
+
+export type ChatMode = 'rag' | 'agent';
 
 export type ChatMessageOptions = {
   retrievalStrategy?: RetrievalStrategy;
   rerankingEnabled?: boolean;
   topK?: number;
   filters?: MetadataFilters;
+  mode?: ChatMode;
+};
+
+export type ChatStreamEvent = (StreamEvent | AgentStreamEvent) & {
+  userMessageId?: string;
+  assistantMessageId?: string;
 };
 
 @Injectable()
 export class ChatService {
   private readonly db = createDbClient();
   private readonly env = loadEnv();
+  private readonly embedder = createEmbedder(this.env);
+  private readonly llm = createLlmClient(this.env);
+  private readonly chunks = createPrismaChunkRepository(this.db);
   private readonly defaultStrategy: RetrievalStrategy = this.env.hybridSearchEnabled
     ? this.env.RAG_RETRIEVAL_STRATEGY
     : 'vector';
   private readonly rag = createRagOrchestrator({
-    embedder: createEmbedder(this.env),
-    llm: createLlmClient(this.env),
-    chunks: createPrismaChunkRepository(this.db),
+    embedder: this.embedder,
+    llm: this.llm,
+    chunks: this.chunks,
     reranker: createReranker(this.env),
     defaultConfig: {
       ...defaultPipelineConfig,
@@ -44,6 +58,10 @@ export class ChatService {
     },
     abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
   });
+
+  agenticEnabled() {
+    return this.env.agenticRagEnabled;
+  }
 
   async listConversations(tenantId: string) {
     const rows = await this.db.conversation.findMany({
@@ -83,6 +101,7 @@ export class ChatService {
       role: MessageRole;
       content: string;
       abstained: boolean;
+      diagnostics: unknown;
       createdAt: string;
       citations: Array<{
         chunkId: string;
@@ -114,6 +133,7 @@ export class ChatService {
         role: message.role,
         content: message.content,
         abstained: message.abstained,
+        diagnostics: message.diagnostics,
         createdAt: message.createdAt.toISOString(),
         citations: message.citations.map((citation) => ({
           chunkId: citation.chunkId,
@@ -131,8 +151,7 @@ export class ChatService {
       retrievalStrategy = 'vector';
     }
 
-    const rerankingEnabled =
-      options?.rerankingEnabled ?? this.env.rerankingEnabled;
+    const rerankingEnabled = options?.rerankingEnabled ?? this.env.rerankingEnabled;
 
     return {
       retrievalStrategy,
@@ -146,12 +165,17 @@ export class ChatService {
     conversationId: string,
     content: string,
     options?: ChatMessageOptions,
-  ): AsyncGenerator<StreamEvent & { userMessageId?: string; assistantMessageId?: string }> {
+  ): AsyncGenerator<ChatStreamEvent> {
     const conversation = await this.db.conversation.findFirst({
       where: { id: conversationId, tenantId, deletedAt: null },
     });
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
+    }
+
+    const mode: ChatMode = options?.mode === 'agent' ? 'agent' : 'rag';
+    if (mode === 'agent' && !this.env.agenticRagEnabled) {
+      throw new ForbiddenException('Agentic RAG is disabled (FF_AGENTIC_RAG)');
     }
 
     const userMessage = await this.db.message.create({
@@ -174,17 +198,50 @@ export class ChatService {
     const filters = normalizeMetadataFilters(options?.filters);
 
     let finalPayload: AnswerPayload | null = null;
-    for await (const event of this.rag.answerStream({
-      tenantId,
-      query: content.trim(),
-      config,
-      filters,
-    })) {
-      if (event.type === 'done') {
-        finalPayload = event.payload;
-        continue;
+
+    if (mode === 'agent') {
+      const knowledge = createTenantAgentKnowledge({
+        db: this.db,
+        tenantId,
+        chunks: this.chunks,
+        embedder: this.embedder,
+      });
+      const agent = createAgentLoop({
+        llm: this.llm,
+        knowledge,
+        embedder: this.embedder,
+        abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
+      });
+
+      for await (const event of agent.answerStream({
+        query: content.trim(),
+        config: {
+          maxSteps: this.env.AGENT_MAX_STEPS,
+          timeoutMs: this.env.AGENT_TIMEOUT_MS,
+          topK: config.topK,
+          retrievalStrategy: config.retrievalStrategy,
+          rerankingEnabled: config.rerankingEnabled,
+        },
+      })) {
+        if (event.type === 'done') {
+          finalPayload = event.payload;
+          continue;
+        }
+        yield { ...event, userMessageId: userMessage.id };
       }
-      yield { ...event, userMessageId: userMessage.id };
+    } else {
+      for await (const event of this.rag.answerStream({
+        tenantId,
+        query: content.trim(),
+        config,
+        filters,
+      })) {
+        if (event.type === 'done') {
+          finalPayload = event.payload;
+          continue;
+        }
+        yield { ...event, userMessageId: userMessage.id };
+      }
     }
 
     const payload: AnswerPayload =
@@ -212,6 +269,7 @@ export class ChatService {
         role: MessageRole.assistant,
         content: payload.text,
         abstained: payload.abstained,
+        diagnostics: payload.diagnostics as Prisma.InputJsonValue,
         citations: {
           create: payload.citations.map((citation) => ({
             tenantId,

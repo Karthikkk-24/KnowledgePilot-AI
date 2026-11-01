@@ -12,15 +12,18 @@ export default function EvaluationPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState('baseline v1');
+  const [agentEnabled, setAgentEnabled] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [runRows, benchRows] = await Promise.all([
+      const [runRows, benchRows, agentStatus] = await Promise.all([
         api.listEvalRuns(),
         api.listBenchmarks(),
+        api.getAgentStatus().catch(() => ({ enabled: false, maxSteps: 5, timeoutMs: 30_000 })),
       ]);
       setRuns(runRows);
       setBenchmarks(benchRows);
+      setAgentEnabled(agentStatus.enabled);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load evaluation data');
@@ -45,12 +48,26 @@ export default function EvaluationPage() {
     }
   }
 
-  async function onStart() {
+  async function onSeedMultihop() {
+    setBusy(true);
+    try {
+      await api.seedMultihopBenchmark();
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Multi-hop seed failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onStart(options?: { agentMode?: boolean; benchmarkSetId?: string }) {
     setBusy(true);
     try {
       const run = await api.startEvalRun({
         label: label.trim() || undefined,
         retrievalStrategy: 'hybrid',
+        agentMode: options?.agentMode,
+        benchmarkSetId: options?.benchmarkSetId,
       });
       await refresh();
       window.location.href = `/evaluation/runs/${run.id}`;
@@ -64,8 +81,8 @@ export default function EvaluationPage() {
     <main style={{ maxWidth: 960, margin: '0 auto', padding: '2rem 1.5rem 4rem' }}>
       <h1 style={{ fontFamily: 'var(--font-display)', marginTop: 0 }}>Evaluation</h1>
       <p style={{ color: 'var(--muted)' }}>
-        Seed the smoke golden set, run hybrid retrieval under a frozen config, and inspect
-        Recall@k / MRR / nDCG / faithfulness / citation metrics.
+        Seed smoke or multi-hop fixtures, compare single-shot RAG vs agent mode on the same
+        benchmark, and inspect Recall@k / MRR / nDCG / faithfulness / citation metrics.
       </p>
 
       <section
@@ -94,6 +111,20 @@ export default function EvaluationPage() {
           >
             Seed smoke benchmark
           </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onSeedMultihop()}
+            style={{
+              border: '1px solid var(--line)',
+              borderRadius: 10,
+              padding: '0.65rem 1rem',
+              background: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            Seed multi-hop benchmark
+          </button>
           <label style={{ display: 'grid', gap: 4, fontSize: '0.85rem' }}>
             <span style={{ color: 'var(--muted)' }}>Run label</span>
             <input
@@ -119,7 +150,25 @@ export default function EvaluationPage() {
               cursor: 'pointer',
             }}
           >
-            Start eval run
+            Start RAG eval
+          </button>
+          <button
+            type="button"
+            disabled={busy || !agentEnabled}
+            onClick={() =>
+              void onStart({ agentMode: true, benchmarkSetId: 'bench_multihop_v1' })
+            }
+            title={agentEnabled ? undefined : 'Enable FF_AGENTIC_RAG'}
+            style={{
+              border: 0,
+              borderRadius: 10,
+              padding: '0.65rem 1rem',
+              background: agentEnabled ? '#0f766e' : '#94a3b8',
+              color: '#fff',
+              cursor: agentEnabled ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Start agent multi-hop eval
           </button>
         </div>
         {benchmarks.length > 0 ? (

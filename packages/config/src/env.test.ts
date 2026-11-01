@@ -35,6 +35,8 @@ describe('loadEnv', () => {
     expect(base.multiQueryEnabled).toBe(false);
     expect(base.parentChildEnabled).toBe(false);
     expect(base.experimentLabEnabled).toBe(true);
+    expect(base.agenticRagEnabled).toBe(false);
+    expect(base.AGENT_MAX_STEPS).toBe(5);
 
     const labOff = loadEnv({ FF_EXPERIMENT_LAB: 'false' });
     expect(labOff.experimentLabEnabled).toBe(false);
@@ -43,10 +45,12 @@ describe('loadEnv', () => {
       FF_QUERY_REWRITE: 'true',
       FF_MULTI_QUERY: '1',
       FF_PARENT_CHILD: 'yes',
+      FF_AGENTIC_RAG: 'true',
     });
     expect(advanced.queryRewriteEnabled).toBe(true);
     expect(advanced.multiQueryEnabled).toBe(true);
     expect(advanced.parentChildEnabled).toBe(true);
+    expect(advanced.agenticRagEnabled).toBe(true);
   });
 
   it('rejects stub auth in production', () => {

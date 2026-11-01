@@ -210,6 +210,8 @@ model Message {
   role           MessageRole
   content        String
   abstained      Boolean     @default(false)
+  /// RAG/agent diagnostics + tool traces (Phase 6)
+  diagnostics    Json?
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 

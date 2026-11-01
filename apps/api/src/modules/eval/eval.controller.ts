@@ -43,6 +43,14 @@ export class EvalController {
     return ok(await this.evalService.seedSmokeBenchmark(auth.tenantId));
   }
 
+  @Post('benchmarks/seed-multihop')
+  @MinRole(MembershipRole.admin)
+  async seedMultihop(
+    @CurrentAuth() auth: AuthPrincipal,
+  ): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
+    return ok(await this.evalService.seedMultihopBenchmark(auth.tenantId));
+  }
+
   @Get('eval/runs')
   async listRuns(
     @CurrentAuth() auth: AuthPrincipal,
@@ -69,6 +77,7 @@ export class EvalController {
       retrievalStrategy?: RetrievalStrategy;
       rerankingEnabled?: boolean;
       topK?: number;
+      agentMode?: boolean;
     },
   ): Promise<ReturnType<typeof ok<EvalRunDetailDto>>> {
     return ok(
@@ -78,6 +87,7 @@ export class EvalController {
         retrievalStrategy: body?.retrievalStrategy,
         rerankingEnabled: body?.rerankingEnabled,
         topK: body?.topK,
+        agentMode: body?.agentMode,
       }),
     );
   }

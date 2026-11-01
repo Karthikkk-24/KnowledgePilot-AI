@@ -7,7 +7,7 @@ export default function HomePage() {
   return (
     <main style={{ maxWidth: 880, margin: '0 auto', padding: '2.5rem 1.5rem 4rem' }}>
       <p style={{ margin: 0, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.75rem', color: 'var(--muted)' }}>
-        Phase 5 · Advanced RAG & experiment lab
+        Phase 6 · Agentic RAG
       </p>
       <h1
         style={{
@@ -20,12 +20,12 @@ export default function HomePage() {
         {APP_NAME}
       </h1>
       <p style={{ margin: 0, color: 'var(--muted)', fontSize: '1.05rem', lineHeight: 1.6, maxWidth: 640 }}>
-        Compare retrieval configs on the same benchmark — rewrite, multi-query, parent-child
-        chunking, and side-by-side metrics in the experiment lab.
+        Tool-traced multi-hop answers on the same grounded retrieval stack — enable
+        FF_AGENTIC_RAG, then use agent mode in chat or the multi-hop eval suite.
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.75rem', flexWrap: 'wrap' }}>
         <Link
-          href="/lab"
+          href="/chat"
           style={{
             background: 'var(--accent)',
             color: '#fff',
@@ -34,7 +34,20 @@ export default function HomePage() {
             borderRadius: 10,
           }}
         >
-          Open experiment lab
+          Open agent chat
+        </Link>
+        <Link
+          href="/lab"
+          style={{
+            border: '1px solid var(--line)',
+            color: 'var(--ink)',
+            textDecoration: 'none',
+            padding: '0.75rem 1.1rem',
+            borderRadius: 10,
+            background: 'var(--panel)',
+          }}
+        >
+          Experiment lab
         </Link>
         <Link
           href="/evaluation"
@@ -61,19 +74,6 @@ export default function HomePage() {
           }}
         >
           Documents
-        </Link>
-        <Link
-          href="/chat"
-          style={{
-            border: '1px solid var(--line)',
-            color: 'var(--ink)',
-            textDecoration: 'none',
-            padding: '0.75rem 1.1rem',
-            borderRadius: 10,
-            background: 'var(--panel)',
-          }}
-        >
-          Chat
         </Link>
       </div>
       <dl

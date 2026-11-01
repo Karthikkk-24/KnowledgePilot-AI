@@ -1,0 +1,45 @@
+{
+  "id": "bench_multihop_v1",
+  "name": "Multi-hop Atlas/DB-7 v1",
+  "version": "1.0.0",
+  "description": "Phase 6 multi-hop questions requiring two retrieval hops",
+  "documents": [
+    {
+      "filename": "atlas-product.md",
+      "title": "Product Atlas"
+    },
+    {
+      "filename": "db7-ops.md",
+      "title": "Database operations DB-7"
+    }
+  ],
+  "items": [
+    {
+      "id": "q_atlas_backup",
+      "question": "What is the backup window for the database used by Product Atlas?",
+      "expectedAnswer": "DB-7 backup window is 02:00–04:00 UTC.",
+      "relevantPassages": [
+        "Product Atlas uses database cluster DB-7",
+        "DB-7 backup window is 02:00–04:00 UTC"
+      ],
+      "tags": ["multihop", "agent"],
+      "difficulty": "hard"
+    },
+    {
+      "id": "q_atlas_db",
+      "question": "Which database cluster does Product Atlas use?",
+      "expectedAnswer": "Product Atlas uses database cluster DB-7.",
+      "relevantPassages": ["Product Atlas uses database cluster DB-7"],
+      "tags": ["single-hop"],
+      "difficulty": "easy"
+    },
+    {
+      "id": "q_db7_window",
+      "question": "What is the DB-7 backup window?",
+      "expectedAnswer": "DB-7 backup window is 02:00–04:00 UTC.",
+      "relevantPassages": ["DB-7 backup window is 02:00–04:00 UTC"],
+      "tags": ["single-hop"],
+      "difficulty": "easy"
+    }
+  ]
+}

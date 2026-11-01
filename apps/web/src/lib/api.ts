@@ -31,11 +31,24 @@ export type ChatFilters = {
   createdBefore?: string;
 };
 
+export type ChatMode = 'rag' | 'agent';
+
+export type AgentTraceStep = {
+  step: number;
+  thought?: string;
+  tool: string;
+  args: Record<string, unknown>;
+  resultSummary: string;
+  latencyMs: number;
+  chunkIds?: string[];
+};
+
 export type ChatStreamOptions = {
   retrievalStrategy?: RetrievalStrategy;
   rerankingEnabled?: boolean;
   topK?: number;
   filters?: ChatFilters;
+  mode?: ChatMode;
 };
 
 export type AnswerDiagnostics = {
@@ -52,6 +65,11 @@ export type AnswerDiagnostics = {
   latencyMs: Record<string, number>;
   topScore?: number;
   scoreKind?: string;
+  agentMode?: boolean;
+  agentSteps?: AgentTraceStep[];
+  agentStepCount?: number;
+  agentTimedOut?: boolean;
+  agentMaxStepsHit?: boolean;
 };
 
 export type AnswerCitation = {
@@ -222,6 +240,7 @@ export const api = {
         role: 'user' | 'assistant' | 'system';
         content: string;
         abstained: boolean;
+        diagnostics?: AnswerDiagnostics | null;
         citations: AnswerCitation[];
         createdAt: string;
       }>;
@@ -259,6 +278,14 @@ export const api = {
       items: unknown[];
     }>('/v1/benchmarks/seed', { method: 'POST' }),
 
+  seedMultihopBenchmark: () =>
+    request<{
+      id: string;
+      name: string;
+      version: string;
+      items: unknown[];
+    }>('/v1/benchmarks/seed-multihop', { method: 'POST' }),
+
   listEvalRuns: () => request<EvalRunSummary[]>('/v1/eval/runs'),
 
   getEvalRun: (id: string) => request<EvalRunDetail>(`/v1/eval/runs/${id}`),
@@ -269,12 +296,18 @@ export const api = {
     retrievalStrategy?: RetrievalStrategy;
     rerankingEnabled?: boolean;
     topK?: number;
+    agentMode?: boolean;
   }) =>
     request<EvalRunDetail>('/v1/eval/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
     }),
+
+  getAgentStatus: () =>
+    request<{ enabled: boolean; maxSteps: number; timeoutMs: number }>(
+      '/v1/conversations/agent/status',
+    ),
 
   getSettings: () =>
     request<{
@@ -350,6 +383,7 @@ export function streamChatMessage(
     onToken: (text: string) => void;
     onCitation: (citation: AnswerCitation) => void;
     onDiagnostics?: (diagnostics: AnswerDiagnostics) => void;
+    onAgentStep?: (step: AgentTraceStep) => void;
     onDone: (payload: AnswerPayload) => void;
     onError: (message: string) => void;
   },
@@ -367,6 +401,7 @@ export function streamChatMessage(
       rerankingEnabled: options?.rerankingEnabled,
       topK: options?.topK,
       filters: options?.filters,
+      mode: options?.mode,
     }),
   }).then(async (response) => {
     if (!response.ok || !response.body) {
@@ -402,6 +437,8 @@ export function streamChatMessage(
             handlers.onCitation(data.citation as AnswerCitation);
           } else if (eventName === 'diagnostics' && data.diagnostics) {
             handlers.onDiagnostics?.(data.diagnostics as AnswerDiagnostics);
+          } else if (eventName === 'agent_step' && data.step) {
+            handlers.onAgentStep?.(data.step as AgentTraceStep);
           } else if (eventName === 'done' && data.payload) {
             handlers.onDone(data.payload as AnswerPayload);
           } else if (eventName === 'error') {

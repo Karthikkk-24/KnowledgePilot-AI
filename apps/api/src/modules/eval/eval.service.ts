@@ -24,8 +24,17 @@ import {
 } from '@knowledgepilot/rag';
 import { createBlobStorage } from '../../adapters/storage.factory';
 import { INGESTION_QUEUE, type IngestionJobPayload } from '../ingestion/ingestion.constants';
-import { EVAL_QUEUE, SMOKE_BENCHMARK_ID, type EvalJobPayload } from './eval.constants';
-import { loadSmokeBenchmarkFixture } from './eval.fixture';
+import {
+  EVAL_QUEUE,
+  MULTIHOP_BENCHMARK_ID,
+  SMOKE_BENCHMARK_ID,
+  type EvalJobPayload,
+} from './eval.constants';
+import {
+  loadMultihopBenchmarkFixture,
+  loadSmokeBenchmarkFixture,
+  type SmokeBenchmarkFixture,
+} from './eval.fixture';
 
 export type StartEvalInput = {
   benchmarkSetId?: string;
@@ -36,6 +45,8 @@ export type StartEvalInput = {
   experimentConfigId?: string;
   /** Full pipeline config override (lab / advanced runs). */
   config?: Partial<PipelineConfig>;
+  /** Phase 6: run items through the agent loop instead of single-shot RAG. */
+  agentMode?: boolean;
 };
 
 export type BenchmarkListItem = {
@@ -156,8 +167,11 @@ export class EvalService {
     };
   }
 
-  async seedSmokeBenchmark(tenantId: string): Promise<BenchmarkDetail> {
-    const { dir, fixture } = loadSmokeBenchmarkFixture();
+  private async seedBenchmarkFromFixture(
+    tenantId: string,
+    dir: string,
+    fixture: SmokeBenchmarkFixture,
+  ): Promise<BenchmarkDetail> {
     const documentIds: string[] = [];
 
     for (const docMeta of fixture.documents) {
@@ -265,6 +279,16 @@ export class EvalService {
     return this.getBenchmark(tenantId, fixture.id);
   }
 
+  async seedSmokeBenchmark(tenantId: string): Promise<BenchmarkDetail> {
+    const { dir, fixture } = loadSmokeBenchmarkFixture();
+    return this.seedBenchmarkFromFixture(tenantId, dir, fixture);
+  }
+
+  async seedMultihopBenchmark(tenantId: string): Promise<BenchmarkDetail> {
+    const { dir, fixture } = loadMultihopBenchmarkFixture();
+    return this.seedBenchmarkFromFixture(tenantId, dir, fixture);
+  }
+
   async listRuns(tenantId: string): Promise<EvalRunDto[]> {
     const rows = await this.db.evalRun.findMany({
       where: { tenantId: tenantId },
@@ -336,12 +360,20 @@ export class EvalService {
 
   async startRun(tenantId: string, input: StartEvalInput = {}): Promise<EvalRunDetailDto> {
     const benchmarkSetId = input.benchmarkSetId ?? SMOKE_BENCHMARK_ID;
+    if (input.agentMode && !this.env.agenticRagEnabled) {
+      throw new BadRequestException('Agentic RAG is disabled (FF_AGENTIC_RAG)');
+    }
+
     let set = await this.db.benchmarkSet.findFirst({
       where: { id: benchmarkSetId, tenantId: tenantId },
       include: { items: true },
     });
     if (!set) {
-      await this.seedSmokeBenchmark(tenantId);
+      if (benchmarkSetId === MULTIHOP_BENCHMARK_ID) {
+        await this.seedMultihopBenchmark(tenantId);
+      } else {
+        await this.seedSmokeBenchmark(tenantId);
+      }
       set = await this.db.benchmarkSet.findFirst({
         where: { id: benchmarkSetId, tenantId: tenantId },
         include: { items: true },
@@ -359,7 +391,7 @@ export class EvalService {
       retrievalStrategy = 'vector';
     }
 
-    const configSnapshot = mergePipelineConfig(defaultPipelineConfig, {
+    const pipeline = mergePipelineConfig(defaultPipelineConfig, {
       ...input.config,
       retrievalStrategy,
       rerankingEnabled:
@@ -374,6 +406,11 @@ export class EvalService {
       multiQueryEnabled:
         input.config?.multiQueryEnabled ?? this.env.multiQueryEnabled,
     });
+
+    const configSnapshot = {
+      ...pipeline,
+      agentMode: Boolean(input.agentMode),
+    };
 
     if (input.experimentConfigId) {
       const experiment = await this.db.experimentConfig.findFirst({

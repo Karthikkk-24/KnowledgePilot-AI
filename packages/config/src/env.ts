@@ -62,6 +62,9 @@ const envSchema = z.object({
   FF_PARENT_CHILD: boolFromEnv,
   FF_EXPERIMENT_LAB: boolFromEnv,
   FF_MULTI_QUERY: boolFromEnv,
+  FF_AGENTIC_RAG: boolFromEnv,
+  AGENT_MAX_STEPS: z.coerce.number().int().positive().max(12).default(5),
+  AGENT_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(30_000),
 });
 
 export type AppEnv = z.infer<typeof envSchema> & {
@@ -75,6 +78,7 @@ export type AppEnv = z.infer<typeof envSchema> & {
   multiQueryEnabled: boolean;
   parentChildEnabled: boolean;
   experimentLabEnabled: boolean;
+  agenticRagEnabled: boolean;
 };
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
@@ -110,6 +114,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   const parentChildEnabled = data.FF_PARENT_CHILD ?? false;
   const experimentLabEnabled =
     data.FF_EXPERIMENT_LAB ?? data.APP_NODE_ENV !== 'production';
+  // Agentic path stays off until explicitly enabled (prod and local).
+  const agenticRagEnabled = data.FF_AGENTIC_RAG ?? false;
   const objectStorageEnabled =
     data.STORAGE_BUCKET.trim().length > 0 &&
     data.STORAGE_ACCESS_KEY.trim().length > 0 &&
@@ -127,5 +133,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     multiQueryEnabled,
     parentChildEnabled,
     experimentLabEnabled,
+    agenticRagEnabled,
   };
 }

@@ -75,3 +75,34 @@ export {
   resolveRelevantChunkIds,
   type PassageChunk,
 } from './evaluation/resolve-relevant-chunks';
+export {
+  createAgentLoop,
+  type AgentLoop,
+  type AgentLoopDeps,
+} from './agent/agent-loop';
+export {
+  createAgentKnowledgeAccess,
+  type AgentDocumentSummary,
+  type AgentKnowledgeAccess,
+} from './agent/knowledge';
+export {
+  executeAgentTool,
+  isAllowedTool,
+  truncateToolObservation,
+} from './agent/tools';
+export {
+  mockPlanNext,
+  parsePlannerResponse,
+  planNextAction,
+} from './agent/planner';
+export {
+  AGENT_TOOL_NAMES,
+  defaultAgentConfig,
+  type AgentAction,
+  type AgentAnswerDiagnostics,
+  type AgentAnswerPayload,
+  type AgentConfig,
+  type AgentStreamEvent,
+  type AgentToolName,
+  type AgentTraceStep,
+} from './agent/types';

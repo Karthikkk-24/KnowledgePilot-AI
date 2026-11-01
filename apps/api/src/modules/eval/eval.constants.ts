@@ -6,3 +6,4 @@ export type EvalJobPayload = {
 };
 
 export const SMOKE_BENCHMARK_ID = 'bench_smoke_v1';
+export const MULTIHOP_BENCHMARK_ID = 'bench_multihop_v1';

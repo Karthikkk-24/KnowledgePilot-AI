@@ -10,7 +10,7 @@ import { MinRole } from '../../auth/roles.decorator';
 import { RolesGuard } from '../../auth/roles.guard';
 import type { AuthPrincipal } from '../../auth/auth.types';
 import { ok } from '../../common/http';
-import { ChatService } from './chat.service';
+import { ChatService, type ChatMode } from './chat.service';
 
 const env = loadEnv();
 
@@ -20,6 +20,7 @@ type PostMessageBody = {
   rerankingEnabled?: boolean;
   topK?: number;
   filters?: MetadataFilters;
+  mode?: ChatMode;
 };
 
 @Controller('conversations')
@@ -38,8 +39,20 @@ export class ChatController {
     return ok(await this.chatService.createConversation(auth.tenantId, body?.title));
   }
 
+  @Get('agent/status')
+  async agentStatus() {
+    return ok({
+      enabled: this.chatService.agenticEnabled(),
+      maxSteps: env.AGENT_MAX_STEPS,
+      timeoutMs: env.AGENT_TIMEOUT_MS,
+    });
+  }
+
   @Get(':id')
-  async get(@CurrentAuth() auth: AuthPrincipal, @Param('id') id: string): Promise<ReturnType<typeof ok>> {
+  async get(
+    @CurrentAuth() auth: AuthPrincipal,
+    @Param('id') id: string,
+  ): Promise<ReturnType<typeof ok>> {
     return ok(await this.chatService.getConversation(auth.tenantId, id));
   }
 
@@ -76,6 +89,15 @@ export class ChatController {
       return;
     }
 
+    if (body.mode && body.mode !== 'rag' && body.mode !== 'agent') {
+      res.status(400).json({
+        data: null,
+        error: { code: 'BAD_REQUEST', message: 'mode must be rag or agent', details: {} },
+        meta: { requestId: auth.requestId },
+      });
+      return;
+    }
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -93,6 +115,7 @@ export class ChatController {
         rerankingEnabled: body.rerankingEnabled,
         topK: body.topK,
         filters: body.filters,
+        mode: body.mode,
       })) {
         if (event.type === 'token') {
           write('token', { text: event.text });
@@ -100,6 +123,8 @@ export class ChatController {
           write('citation', { citation: event.citation });
         } else if (event.type === 'diagnostics') {
           write('diagnostics', { diagnostics: event.diagnostics });
+        } else if (event.type === 'agent_step') {
+          write('agent_step', { step: event.step });
         } else if (event.type === 'error') {
           write('error', { message: event.message });
         } else if (event.type === 'done') {

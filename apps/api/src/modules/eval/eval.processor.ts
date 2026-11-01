@@ -6,13 +6,16 @@ import { createDbClient, EvalRunState } from '@knowledgepilot/db';
 import {
   averageMetrics,
   computeItemMetrics,
+  createAgentLoop,
   createRagOrchestrator,
   defaultPipelineConfig,
   parseCitationIds,
   resolveRelevantChunkIds,
+  type AnswerPayload,
   type ItemMetrics,
   type PipelineConfig,
 } from '@knowledgepilot/rag';
+import { createTenantAgentKnowledge } from '../../adapters/agent-knowledge.factory';
 import { createEmbedder, createLlmClient, createReranker } from '../../adapters/ai.factory';
 import { createPrismaChunkRepository } from '../../adapters/prisma-chunk.repository';
 import { EVAL_QUEUE, type EvalJobPayload } from './eval.constants';
@@ -22,10 +25,12 @@ export class EvalProcessor extends WorkerHost {
   private readonly logger = new Logger(EvalProcessor.name);
   private readonly db = createDbClient();
   private readonly env = loadEnv();
+  private readonly embedder = createEmbedder(this.env);
+  private readonly llm = createLlmClient(this.env);
   private readonly chunks = createPrismaChunkRepository(this.db);
   private readonly rag = createRagOrchestrator({
-    embedder: createEmbedder(this.env),
-    llm: createLlmClient(this.env),
+    embedder: this.embedder,
+    llm: this.llm,
     chunks: this.chunks,
     reranker: createReranker(this.env),
     defaultConfig: defaultPipelineConfig,
@@ -46,10 +51,28 @@ export class EvalProcessor extends WorkerHost {
       throw new Error(`Eval run ${evalRunId} not found`);
     }
 
+    const snapshot = (run.configSnapshot ?? {}) as Partial<PipelineConfig> & {
+      agentMode?: boolean;
+    };
     const config = {
       ...defaultPipelineConfig,
-      ...(run.configSnapshot as Partial<PipelineConfig>),
+      ...snapshot,
     } satisfies PipelineConfig;
+    const agentMode = Boolean(snapshot.agentMode) && this.env.agenticRagEnabled;
+
+    const agent = agentMode
+      ? createAgentLoop({
+          llm: this.llm,
+          knowledge: createTenantAgentKnowledge({
+            db: this.db,
+            tenantId,
+            chunks: this.chunks,
+            embedder: this.embedder,
+          }),
+          embedder: this.embedder,
+          abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
+        })
+      : null;
 
     await this.db.evalRun.update({
       where: { id: evalRunId },
@@ -83,11 +106,22 @@ export class EvalProcessor extends WorkerHost {
             : resolveRelevantChunkIds(passages, tenantChunks);
 
         try {
-          const answer = await this.rag.answer({
-            tenantId,
-            query: item.question,
-            config,
-          });
+          const answer: AnswerPayload = agent
+            ? await agent.answer({
+                query: item.question,
+                config: {
+                  maxSteps: this.env.AGENT_MAX_STEPS,
+                  timeoutMs: this.env.AGENT_TIMEOUT_MS,
+                  topK: config.topK,
+                  retrievalStrategy: config.retrievalStrategy,
+                  rerankingEnabled: config.rerankingEnabled,
+                },
+              })
+            : await this.rag.answer({
+                tenantId,
+                query: item.question,
+                config,
+              });
 
           const retrievedIds = answer.diagnostics.retrievedChunkIds;
           const citedIds =
