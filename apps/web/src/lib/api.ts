@@ -1,10 +1,25 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? 'stub';
 
 export type ApiEnvelope<T> = {
   data: T;
   error: { code: string; message: string; details?: Record<string, unknown> } | null;
   meta: { requestId: string };
 };
+
+function authHeaders(): HeadersInit {
+  const headers: Record<string, string> = {};
+  if (AUTH_MODE === 'stub') {
+    // Optional overrides for multi-tenant demos / isolation tests from the browser.
+    if (typeof window !== 'undefined') {
+      const userId = window.localStorage.getItem('kp_user_id');
+      const tenantId = window.localStorage.getItem('kp_tenant_id');
+      if (userId) headers['x-kp-user-id'] = userId;
+      if (tenantId) headers['x-kp-tenant-id'] = tenantId;
+    }
+  }
+  return headers;
+}
 
 export type RetrievalStrategy = 'vector' | 'keyword' | 'hybrid';
 
@@ -26,6 +41,11 @@ export type ChatStreamOptions = {
 export type AnswerDiagnostics = {
   retrievalStrategy: RetrievalStrategy;
   rerankingEnabled: boolean;
+  queryRewriteEnabled?: boolean;
+  multiQueryEnabled?: boolean;
+  contextCompressionEnabled?: boolean;
+  rewrittenQuery?: string;
+  multiQueries?: string[];
   retrievedChunkIds: string[];
   rerankedChunkIds?: string[];
   invalidCitationIds?: string[];
@@ -50,6 +70,56 @@ export type AnswerPayload = {
   diagnostics: AnswerDiagnostics;
 };
 
+export type PipelineConfig = {
+  retrievalStrategy: RetrievalStrategy;
+  chunkingStrategy: 'fixed' | 'structure_aware' | 'parent_child';
+  rerankingEnabled: boolean;
+  topK: number;
+  rerankTopN: number;
+  candidateMultiplier: number;
+  queryRewriteEnabled: boolean;
+  multiQueryEnabled: boolean;
+  contextCompressionEnabled: boolean;
+  abstentionThreshold: number;
+  rrfK: number;
+};
+
+export type ExperimentConfig = {
+  id: string;
+  name: string;
+  description: string | null;
+  config: PipelineConfig;
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LabCompareRow = {
+  runId: string;
+  label: string | null;
+  experimentConfigId: string | null;
+  state: string;
+  configSummary: string;
+  configSnapshot: PipelineConfig;
+  metricsSummary: Record<string, number> | null;
+  latencyMsTotal: number | null;
+  estimatedCostUsd: number | null;
+  itemCount: number;
+  completedCount: number;
+};
+
+export type LabStatus = {
+  enabled: boolean;
+  flags: {
+    queryRewrite: boolean;
+    multiQuery: boolean;
+    parentChild: boolean;
+    reranking: boolean;
+    hybridSearch: boolean;
+  };
+  documentChunking: Array<{ strategy: string; count: number }>;
+};
+
 export type EvalRunSummary = {
   id: string;
   label: string | null;
@@ -62,6 +132,7 @@ export type EvalRunSummary = {
   estimatedCostUsd: number | null;
   errorMessage: string | null;
   configSnapshot: Record<string, unknown>;
+  experimentConfigId?: string | null;
   benchmarkSet: { id: string; name: string; version: string };
   startedAt: string | null;
   finishedAt: string | null;
@@ -85,7 +156,11 @@ export type EvalRunDetail = EvalRunSummary & {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, init);
+  const headers = {
+    ...authHeaders(),
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
   const json = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok || json.error) {
     throw new Error(json.error?.message || `Request failed (${response.status})`);
@@ -200,6 +275,72 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body ?? {}),
     }),
+
+  getSettings: () =>
+    request<{
+      tenant: { id: string; name: string; slug: string; createdAt: string };
+      role: string | null;
+      members: Array<{
+        userId: string;
+        email: string | null;
+        name: string | null;
+        role: string;
+        createdAt: string;
+      }>;
+    }>('/v1/settings'),
+
+  getMe: () =>
+    request<{
+      userId: string;
+      tenantId: string;
+      role: string;
+      email?: string | null;
+      name?: string | null;
+    }>('/v1/settings/me'),
+
+  updateTenantName: (name: string) =>
+    request<{ id: string; name: string; slug: string }>('/v1/settings/tenant', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+
+  getLabStatus: () => request<LabStatus>('/v1/lab/status'),
+
+  listExperimentConfigs: () => request<ExperimentConfig[]>('/v1/lab/configs'),
+
+  seedExperimentPresets: () =>
+    request<ExperimentConfig[]>('/v1/lab/configs/seed', { method: 'POST' }),
+
+  createExperimentConfig: (body: {
+    name: string;
+    description?: string;
+    config: PipelineConfig;
+  }) =>
+    request<ExperimentConfig>('/v1/lab/configs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  runExperimentConfig: (
+    id: string,
+    body?: { benchmarkSetId?: string; label?: string },
+  ) =>
+    request<EvalRunDetail>(`/v1/lab/configs/${id}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    }),
+
+  compareLabRuns: (runIds: string[]) =>
+    request<LabCompareRow[]>('/v1/lab/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runIds }),
+    }),
+
+  listLabRuns: () => request<EvalRunSummary[]>('/v1/lab/runs'),
 };
 
 export function streamChatMessage(
@@ -216,7 +357,10 @@ export function streamChatMessage(
 ): Promise<void> {
   return fetch(`${API_URL}/v1/conversations/${conversationId}/messages`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+    },
     body: JSON.stringify({
       content,
       retrievalStrategy: options?.retrievalStrategy,

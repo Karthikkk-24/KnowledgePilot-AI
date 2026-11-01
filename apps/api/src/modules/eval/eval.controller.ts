@@ -37,12 +37,16 @@ export class EvalController {
 
   @Post('benchmarks/seed')
   @MinRole(MembershipRole.admin)
-  async seed(@CurrentAuth() auth: AuthPrincipal): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
+  async seed(
+    @CurrentAuth() auth: AuthPrincipal,
+  ): Promise<ReturnType<typeof ok<BenchmarkDetail>>> {
     return ok(await this.evalService.seedSmokeBenchmark(auth.tenantId));
   }
 
   @Get('eval/runs')
-  async listRuns(@CurrentAuth() auth: AuthPrincipal): Promise<ReturnType<typeof ok<EvalRunDto[]>>> {
+  async listRuns(
+    @CurrentAuth() auth: AuthPrincipal,
+  ): Promise<ReturnType<typeof ok<EvalRunDto[]>>> {
     return ok(await this.evalService.listRuns(auth.tenantId));
   }
 

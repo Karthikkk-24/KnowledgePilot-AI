@@ -10,27 +10,36 @@ import {
 } from '@knowledgepilot/db';
 import {
   chunkFixedSize,
+  chunkParentChild,
   chunkStructureAware,
   estimateTokenCount,
   extractTextFromBuffer,
   hashContent,
 } from '@knowledgepilot/rag';
 import { createEmbedder } from '../../adapters/ai.factory';
-import { createLocalBlobStorage } from '../../adapters/local-storage';
+import { createBlobStorage } from '../../adapters/storage.factory';
 import { insertChunkWithEmbedding } from '../../adapters/prisma-chunk.repository';
 import { INGESTION_QUEUE, type IngestionJobPayload } from './ingestion.constants';
 
-@Processor(INGESTION_QUEUE)
+@Processor(INGESTION_QUEUE, {
+  concurrency: Number(process.env.INGESTION_CONCURRENCY || 2),
+})
 export class IngestionProcessor extends WorkerHost {
   private readonly logger = new Logger(IngestionProcessor.name);
   private readonly db = createDbClient();
   private readonly env = loadEnv();
-  private readonly storage = createLocalBlobStorage(this.env.STORAGE_LOCAL_PATH);
+  private readonly storage = createBlobStorage(this.env);
   private readonly embedder = createEmbedder(this.env);
 
   async process(job: Job<IngestionJobPayload>): Promise<void> {
     const { documentId, ingestionJobId, tenantId } = job.data;
-    this.logger.log(`ingestion start`, { documentId, ingestionJobId, bullJobId: job.id });
+    this.logger.log(`ingestion start`, {
+      documentId,
+      ingestionJobId,
+      tenantId,
+      bullJobId: job.id,
+      attempt: job.attemptsMade + 1,
+    });
 
     try {
       await this.setJobState(ingestionJobId, IngestionJobState.processing, 5);
@@ -61,50 +70,120 @@ export class IngestionProcessor extends WorkerHost {
       const binaryHash = createHash('sha256').update(buffer).digest('hex');
 
       await this.setJobState(ingestionJobId, IngestionJobState.chunking, 40);
-      const useStructure =
-        document.mimeType.includes('markdown') ||
-        document.mimeType.includes('html') ||
-        document.originalFilename.match(/\.(md|markdown|html|htm)$/i);
-      const pieces = useStructure
-        ? chunkStructureAware(extracted.text, {
-            chunkSize: this.env.RAG_DEFAULT_CHUNK_SIZE,
-            overlap: this.env.RAG_DEFAULT_CHUNK_OVERLAP,
-          })
-        : chunkFixedSize(extracted.text, {
-            chunkSize: this.env.RAG_DEFAULT_CHUNK_SIZE,
-            overlap: this.env.RAG_DEFAULT_CHUNK_OVERLAP,
-          });
-
-      if (pieces.length === 0) {
-        throw new Error('Chunking produced no chunks');
-      }
+      const requestedStrategy =
+        document.chunkingStrategy === 'parent_child' ||
+        document.chunkingStrategy === 'fixed' ||
+        document.chunkingStrategy === 'structure_aware'
+          ? document.chunkingStrategy
+          : this.env.parentChildEnabled
+            ? 'parent_child'
+            : document.mimeType.includes('markdown') ||
+                document.mimeType.includes('html') ||
+                document.originalFilename.match(/\.(md|markdown|html|htm)$/i)
+              ? 'structure_aware'
+              : 'fixed';
 
       await this.db.chunk.deleteMany({ where: { documentId, tenantId } });
 
-      await this.setJobState(ingestionJobId, IngestionJobState.embedding, 60);
-      const embeddings = await this.embedder.embed(pieces.map((p) => p.content));
-      if (embeddings.length !== pieces.length) {
-        throw new Error('Embedding count mismatch');
-      }
+      let chunkCount = 0;
+      let chunkingStrategy = requestedStrategy;
 
-      await this.setJobState(ingestionJobId, IngestionJobState.indexing, 80);
-      for (let i = 0; i < pieces.length; i += 1) {
-        const piece = pieces[i]!;
-        const embedding = embeddings[i]!;
-        await insertChunkWithEmbedding(this.db, {
-          id: `chk_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
-          tenantId,
-          documentId,
-          content: piece.content,
-          tokenCount: estimateTokenCount(piece.content),
-          headingPath: piece.headingPath,
-          pageStart: piece.pageStart,
-          pageEnd: piece.pageEnd,
-          charStart: piece.charStart,
-          charEnd: piece.charEnd,
-          ordinal: i,
-          embedding,
+      await this.setJobState(ingestionJobId, IngestionJobState.embedding, 60);
+
+      if (requestedStrategy === 'parent_child') {
+        const { parents, children } = chunkParentChild(extracted.text, {
+          parentSize: Math.max(this.env.RAG_DEFAULT_CHUNK_SIZE * 2, 1200),
+          childSize: this.env.RAG_DEFAULT_CHUNK_SIZE,
+          childOverlap: this.env.RAG_DEFAULT_CHUNK_OVERLAP,
         });
+        if (parents.length === 0) {
+          throw new Error('Chunking produced no chunks');
+        }
+        const parentEmbeddings = await this.embedder.embed(parents.map((p) => p.content));
+        const parentIds: string[] = [];
+        await this.setJobState(ingestionJobId, IngestionJobState.indexing, 80);
+        for (let i = 0; i < parents.length; i += 1) {
+          const parent = parents[i]!;
+          const embedding = parentEmbeddings[i]!;
+          const id = `chk_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+          parentIds.push(id);
+          await insertChunkWithEmbedding(this.db, {
+            id,
+            tenantId,
+            documentId,
+            content: parent.content,
+            tokenCount: estimateTokenCount(parent.content),
+            headingPath: parent.headingPath,
+            pageStart: parent.pageStart,
+            pageEnd: parent.pageEnd,
+            charStart: parent.charStart,
+            charEnd: parent.charEnd,
+            ordinal: i,
+            embedding,
+          });
+        }
+        const childEmbeddings = await this.embedder.embed(children.map((c) => c.content));
+        for (let i = 0; i < children.length; i += 1) {
+          const child = children[i]!;
+          const embedding = childEmbeddings[i]!;
+          const parentId = parentIds[child.parentOrdinal ?? 0];
+          await insertChunkWithEmbedding(this.db, {
+            id: `chk_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+            tenantId,
+            documentId,
+            parentChunkId: parentId,
+            content: child.content,
+            tokenCount: estimateTokenCount(child.content),
+            headingPath: child.headingPath,
+            pageStart: child.pageStart,
+            pageEnd: child.pageEnd,
+            charStart: child.charStart,
+            charEnd: child.charEnd,
+            ordinal: parents.length + i,
+            embedding,
+          });
+        }
+        chunkCount = parents.length + children.length;
+        chunkingStrategy = 'parent_child';
+      } else {
+        const pieces =
+          requestedStrategy === 'structure_aware'
+            ? chunkStructureAware(extracted.text, {
+                chunkSize: this.env.RAG_DEFAULT_CHUNK_SIZE,
+                overlap: this.env.RAG_DEFAULT_CHUNK_OVERLAP,
+              })
+            : chunkFixedSize(extracted.text, {
+                chunkSize: this.env.RAG_DEFAULT_CHUNK_SIZE,
+                overlap: this.env.RAG_DEFAULT_CHUNK_OVERLAP,
+              });
+        if (pieces.length === 0) {
+          throw new Error('Chunking produced no chunks');
+        }
+        const embeddings = await this.embedder.embed(pieces.map((p) => p.content));
+        if (embeddings.length !== pieces.length) {
+          throw new Error('Embedding count mismatch');
+        }
+        await this.setJobState(ingestionJobId, IngestionJobState.indexing, 80);
+        for (let i = 0; i < pieces.length; i += 1) {
+          const piece = pieces[i]!;
+          const embedding = embeddings[i]!;
+          await insertChunkWithEmbedding(this.db, {
+            id: `chk_${randomUUID().replace(/-/g, '').slice(0, 20)}`,
+            tenantId,
+            documentId,
+            content: piece.content,
+            tokenCount: estimateTokenCount(piece.content),
+            headingPath: piece.headingPath,
+            pageStart: piece.pageStart,
+            pageEnd: piece.pageEnd,
+            charStart: piece.charStart,
+            charEnd: piece.charEnd,
+            ordinal: i,
+            embedding,
+          });
+        }
+        chunkCount = pieces.length;
+        chunkingStrategy = requestedStrategy;
       }
 
       await this.db.document.update({
@@ -113,11 +192,11 @@ export class IngestionProcessor extends WorkerHost {
           status: DocumentStatus.ready,
           pageCount: extracted.pageCount ?? null,
           embeddingModel: this.embedder.model,
-          chunkingStrategy: useStructure ? 'structure_aware' : 'fixed',
+          chunkingStrategy,
           contentHash: binaryHash || textHash,
           metadata: {
             textHash,
-            chunkCount: pieces.length,
+            chunkCount,
             embeddingDims: this.embedder.dimensions,
           },
           errorMessage: null,
@@ -135,7 +214,7 @@ export class IngestionProcessor extends WorkerHost {
         },
       });
 
-      this.logger.log(`ingestion ready`, { documentId, chunks: pieces.length });
+      this.logger.log(`ingestion ready`, { documentId, chunks: chunkCount });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Ingestion failed';
       this.logger.error(`ingestion failed`, { documentId, message });

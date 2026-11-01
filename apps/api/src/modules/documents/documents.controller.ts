@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Param,
   Post,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -11,6 +13,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
+import type { Request } from 'express';
 import { MembershipRole } from '@knowledgepilot/db';
 import { loadEnv } from '@knowledgepilot/config';
 import { CurrentAuth } from '../../auth/current-auth.decorator';
@@ -53,8 +56,13 @@ export class DocumentsController {
   async upload(
     @CurrentAuth() auth: AuthPrincipal,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
   ): Promise<ReturnType<typeof ok>> {
-    return ok(await this.documentsService.upload(auth.tenantId, file));
+    const chunkingStrategy =
+      typeof req.body?.chunkingStrategy === 'string' ? req.body.chunkingStrategy : undefined;
+    return ok(
+      await this.documentsService.upload(auth.tenantId, file, { chunkingStrategy }),
+    );
   }
 
   @Delete(':id')
@@ -71,7 +79,12 @@ export class DocumentsController {
   async retry(
     @CurrentAuth() auth: AuthPrincipal,
     @Param('id') id: string,
+    @Body() body: { chunkingStrategy?: string },
   ): Promise<ReturnType<typeof ok>> {
-    return ok(await this.documentsService.retryIngestion(auth.tenantId, id));
+    return ok(
+      await this.documentsService.retryIngestion(auth.tenantId, id, {
+        chunkingStrategy: body?.chunkingStrategy,
+      }),
+    );
   }
 }

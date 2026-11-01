@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { APP_NAME } from '@knowledgepilot/shared';
+import { Providers } from '../components/providers';
 import { SiteNav } from '../components/site-nav';
 import './globals.css';
 
@@ -13,8 +14,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <SiteNav />
-        {children}
+        <Providers>
+          <SiteNav />
+          {children}
+        </Providers>
       </body>
     </html>
   );

@@ -19,6 +19,7 @@ export type {
   BenchmarkItem,
   EvalRun,
   EvalItemResult,
+  ExperimentConfig,
   User,
   Membership,
 } from '@prisma/client';

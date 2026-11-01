@@ -38,6 +38,9 @@ export class ChatService {
       rerankingEnabled: this.env.rerankingEnabled,
       topK: this.env.RAG_DEFAULT_TOP_K,
       abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
+      queryRewriteEnabled: this.env.queryRewriteEnabled,
+      multiQueryEnabled: this.env.multiQueryEnabled,
+      chunkingStrategy: this.env.parentChildEnabled ? 'parent_child' : 'structure_aware',
     },
     abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
   });
@@ -184,8 +187,9 @@ export class ChatService {
       yield { ...event, userMessageId: userMessage.id };
     }
 
-    if (!finalPayload) {
-      finalPayload = {
+    const payload: AnswerPayload =
+      finalPayload ??
+      ({
         text: 'Failed to generate an answer.',
         abstained: true,
         abstentionReason: 'pipeline_error',
@@ -193,21 +197,23 @@ export class ChatService {
         diagnostics: {
           retrievalStrategy: config.retrievalStrategy,
           rerankingEnabled: config.rerankingEnabled,
+          queryRewriteEnabled: false,
+          multiQueryEnabled: false,
+          contextCompressionEnabled: false,
           retrievedChunkIds: [],
           latencyMs: {},
         },
-      };
-    }
+      } satisfies AnswerPayload);
 
     const assistant = await this.db.message.create({
       data: {
         tenantId,
         conversationId,
         role: MessageRole.assistant,
-        content: finalPayload.text,
-        abstained: finalPayload.abstained,
+        content: payload.text,
+        abstained: payload.abstained,
         citations: {
-          create: finalPayload.citations.map((citation) => ({
+          create: payload.citations.map((citation) => ({
             tenantId,
             chunkId: citation.chunkId,
             documentId: citation.documentId,
@@ -225,7 +231,7 @@ export class ChatService {
 
     yield {
       type: 'done',
-      payload: finalPayload,
+      payload,
       userMessageId: userMessage.id,
       assistantMessageId: assistant.id,
     };

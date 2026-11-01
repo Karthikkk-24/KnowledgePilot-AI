@@ -13,6 +13,7 @@ import {
   STUB_USER_ID,
 } from '@knowledgepilot/db';
 import type { AuthPrincipal } from './auth.types';
+import { resolveAuthorizedTenantId } from './tenant-access';
 
 @Injectable()
 export class AuthService {
@@ -159,15 +160,9 @@ export class AuthService {
     memberships: Array<{ tenantId: string }>,
     tenantIdHeader?: string,
   ): Promise<string> {
-    if (!memberships.length) {
-      throw new ForbiddenException('User has no tenant memberships');
-    }
-    if (tenantIdHeader) {
-      if (!memberships.some((m) => m.tenantId === tenantIdHeader)) {
-        throw new ForbiddenException('Not a member of requested tenant');
-      }
-      return tenantIdHeader;
-    }
-    return memberships[0]!.tenantId;
+    return resolveAuthorizedTenantId(
+      memberships.map((m) => m.tenantId),
+      tenantIdHeader,
+    );
   }
 }

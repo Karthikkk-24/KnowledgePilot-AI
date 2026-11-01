@@ -13,5 +13,6 @@ import { EvalService } from './eval.service';
   ],
   controllers: [EvalController],
   providers: [EvalService, EvalProcessor],
+  exports: [EvalService],
 })
 export class EvalModule {}

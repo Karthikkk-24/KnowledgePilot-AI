@@ -56,9 +56,12 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379
       APP_PORT: 3001
       APP_WEB_ORIGIN: http://localhost:3000
+      AUTH_PROVIDER: stub
+      NEXT_PUBLIC_AUTH_PROVIDER: stub
       FF_HYBRID_SEARCH: 'true'
       FF_RERANKING: 'false'
       STORAGE_LOCAL_PATH: ./uploads
+      INGESTION_MAX_ATTEMPTS: 5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

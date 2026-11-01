@@ -70,9 +70,10 @@ model Tenant {
   documents      Document[]
   conversations  Conversation[]
   ingestionJobs  IngestionJob[]
-  benchmarkSets  BenchmarkSet[]
-  evalRuns       EvalRun[]
-  memberships    Membership[]
+  benchmarkSets       BenchmarkSet[]
+  evalRuns            EvalRun[]
+  memberships         Membership[]
+  experimentConfigs   ExperimentConfig[]
 
   @@map("tenants")
 }
@@ -279,33 +280,53 @@ model BenchmarkItem {
   @@map("benchmark_items")
 }
 
-model EvalRun {
-  id               String       @id @default(cuid())
-  tenantId         String       @map("tenant_id")
-  benchmarkSetId   String       @map("benchmark_set_id")
-  state            EvalRunState @default(queued)
-  label            String?
-  configSnapshot   Json         @map("config_snapshot")
-  progress         Int          @default(0)
-  itemCount        Int          @default(0) @map("item_count")
-  completedCount   Int          @default(0) @map("completed_count")
-  metricsSummary   Json?        @map("metrics_summary")
-  latencyMsTotal   Int?         @map("latency_ms_total")
-  estimatedCostUsd Float?       @map("estimated_cost_usd")
-  errorMessage     String?      @map("error_message")
-  bullJobId        String?      @map("bull_job_id")
-  startedAt        DateTime?    @map("started_at")
-  finishedAt       DateTime?    @map("finished_at")
-  createdAt        DateTime     @default(now()) @map("created_at")
-  updatedAt        DateTime     @updatedAt @map("updated_at")
+model ExperimentConfig {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  description String?
+  config      Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  benchmarkSet BenchmarkSet     @relation(fields: [benchmarkSetId], references: [id], onDelete: Restrict)
-  itemResults  EvalItemResult[]
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  evalRuns EvalRun[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, createdAt])
+  @@map("experiment_configs")
+}
+
+model EvalRun {
+  id                 String       @id @default(cuid())
+  tenantId           String       @map("tenant_id")
+  benchmarkSetId     String       @map("benchmark_set_id")
+  experimentConfigId String?      @map("experiment_config_id")
+  state              EvalRunState @default(queued)
+  label              String?
+  configSnapshot     Json         @map("config_snapshot")
+  progress           Int          @default(0)
+  itemCount          Int          @default(0) @map("item_count")
+  completedCount     Int          @default(0) @map("completed_count")
+  metricsSummary     Json?        @map("metrics_summary")
+  latencyMsTotal     Int?         @map("latency_ms_total")
+  estimatedCostUsd   Float?       @map("estimated_cost_usd")
+  errorMessage       String?      @map("error_message")
+  bullJobId          String?      @map("bull_job_id")
+  startedAt          DateTime?    @map("started_at")
+  finishedAt         DateTime?    @map("finished_at")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  benchmarkSet     BenchmarkSet      @relation(fields: [benchmarkSetId], references: [id], onDelete: Restrict)
+  experimentConfig ExperimentConfig? @relation(fields: [experimentConfigId], references: [id], onDelete: SetNull)
+  itemResults      EvalItemResult[]
 
   @@index([tenantId, createdAt])
   @@index([benchmarkSetId, createdAt])
   @@index([tenantId, state])
+  @@index([experimentConfigId])
   @@map("eval_runs")
 }
 

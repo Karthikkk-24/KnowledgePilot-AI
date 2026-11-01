@@ -18,7 +18,8 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@knowledgepilot/eslint-config": "workspace:*",

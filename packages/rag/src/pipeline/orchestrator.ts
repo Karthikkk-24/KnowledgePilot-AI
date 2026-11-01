@@ -5,8 +5,11 @@ import type { Embedder } from '../ports/embedder';
 import type { LlmClient } from '../ports/llm-client';
 import type { Reranker } from '../ports/reranker';
 import { normalizeMetadataFilters, type MetadataFilters } from '../retrieval/metadata-filters';
+import { reciprocalRankFusion } from '../retrieval/reciprocal-rank-fusion';
 import { type PipelineConfig } from '../types';
+import { compressEvidence } from './context-compression';
 import { shouldAbstainOnRetrieval } from './decide-abstention';
+import { expandMultiQueries, rewriteQuery } from './query-rewrite';
 import { isAbstentionResponse, validateCitations } from './validate-citations';
 
 export type AnswerCitation = {
@@ -17,21 +20,28 @@ export type AnswerCitation = {
   documentTitle?: string;
 };
 
+export type AnswerDiagnostics = {
+  retrievalStrategy: PipelineConfig['retrievalStrategy'];
+  rerankingEnabled: boolean;
+  queryRewriteEnabled: boolean;
+  multiQueryEnabled: boolean;
+  contextCompressionEnabled: boolean;
+  rewrittenQuery?: string;
+  multiQueries?: string[];
+  retrievedChunkIds: string[];
+  rerankedChunkIds?: string[];
+  invalidCitationIds?: string[];
+  latencyMs: Record<string, number>;
+  topScore?: number;
+  scoreKind?: string;
+};
+
 export type AnswerPayload = {
   text: string;
   abstained: boolean;
   abstentionReason?: string;
   citations: AnswerCitation[];
-  diagnostics: {
-    retrievalStrategy: PipelineConfig['retrievalStrategy'];
-    rerankingEnabled: boolean;
-    retrievedChunkIds: string[];
-    rerankedChunkIds?: string[];
-    invalidCitationIds?: string[];
-    latencyMs: Record<string, number>;
-    topScore?: number;
-    scoreKind?: string;
-  };
+  diagnostics: AnswerDiagnostics;
 };
 
 export type StreamEvent =
@@ -91,13 +101,20 @@ function finalizeAnswer(
   extras: {
     retrievedChunkIds: string[];
     rerankedChunkIds?: string[];
+    rewrittenQuery?: string;
+    multiQueries?: string[];
     forceAbstain?: { reason: string };
   },
 ): AnswerPayload {
   const evidenceIds = evidence.map((c) => c.id);
-  const baseDiagnostics = {
+  const baseDiagnostics: AnswerDiagnostics = {
     retrievalStrategy: config.retrievalStrategy,
     rerankingEnabled: config.rerankingEnabled,
+    queryRewriteEnabled: config.queryRewriteEnabled,
+    multiQueryEnabled: config.multiQueryEnabled,
+    contextCompressionEnabled: config.contextCompressionEnabled,
+    rewrittenQuery: extras.rewrittenQuery,
+    multiQueries: extras.multiQueries,
     retrievedChunkIds: extras.retrievedChunkIds,
     rerankedChunkIds: extras.rerankedChunkIds,
     latencyMs,
@@ -161,6 +178,31 @@ function finalizeAnswer(
 }
 
 export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
+  async function searchOne(
+    tenantId: string,
+    query: string,
+    topK: number,
+    strategy: PipelineConfig['retrievalStrategy'],
+    filters: MetadataFilters | undefined,
+  ): Promise<RetrievedChunk[]> {
+    let embedding: number[] | undefined;
+    if (strategy === 'vector' || strategy === 'hybrid') {
+      const [queryEmbedding] = await deps.embedder.embed([query]);
+      if (!queryEmbedding) {
+        throw new Error('Embedder returned no vector for query');
+      }
+      embedding = queryEmbedding;
+    }
+    return deps.chunks.search({
+      tenantId,
+      query,
+      embedding,
+      topK,
+      strategy,
+      filters,
+    });
+  }
+
   async function retrieveAndMaybeRerank(input: AnswerInput, config: PipelineConfig) {
     const latencyMs: Record<string, number> = {};
     const filters = normalizeMetadataFilters(input.filters);
@@ -168,27 +210,53 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
       ? Math.max(config.topK * config.candidateMultiplier, config.rerankTopN * 2)
       : config.topK;
 
-    let embedding: number[] | undefined;
-    if (config.retrievalStrategy === 'vector' || config.retrievalStrategy === 'hybrid') {
-      const embedStarted = Date.now();
-      const [queryEmbedding] = await deps.embedder.embed([input.query]);
-      latencyMs.embed = Date.now() - embedStarted;
-      if (!queryEmbedding) {
-        throw new Error('Embedder returned no vector for query');
-      }
-      embedding = queryEmbedding;
+    let activeQuery = input.query;
+    let rewrittenQuery: string | undefined;
+    let multiQueries: string[] | undefined;
+
+    if (config.queryRewriteEnabled) {
+      const started = Date.now();
+      rewrittenQuery = await rewriteQuery(deps.llm, input.query);
+      activeQuery = rewrittenQuery;
+      latencyMs.rewrite = Date.now() - started;
     }
 
+    if (config.multiQueryEnabled) {
+      const started = Date.now();
+      multiQueries = await expandMultiQueries(deps.llm, activeQuery);
+      latencyMs.multiQuery = Date.now() - started;
+    }
+
+    const queries = multiQueries && multiQueries.length > 0 ? multiQueries : [activeQuery];
+
     const retrieveStarted = Date.now();
-    let retrieved = await deps.chunks.search({
-      tenantId: input.tenantId,
-      query: input.query,
-      embedding,
-      topK: candidateCount,
-      strategy: config.retrievalStrategy,
-      filters,
-    });
+    const perQueryHits = await Promise.all(
+      queries.map((q) =>
+        searchOne(input.tenantId, q, candidateCount, config.retrievalStrategy, filters),
+      ),
+    );
     latencyMs.retrieve = Date.now() - retrieveStarted;
+
+    let retrieved: RetrievedChunk[];
+    if (perQueryHits.length === 1) {
+      retrieved = perQueryHits[0] ?? [];
+    } else {
+      const fused = reciprocalRankFusion(
+        perQueryHits.map((hits) => hits.map((h) => h.id)),
+        { k: config.rrfK },
+      ).slice(0, candidateCount);
+      const byId = new Map<string, RetrievedChunk>();
+      for (const hits of perQueryHits) {
+        for (const hit of hits) {
+          if (!byId.has(hit.id)) byId.set(hit.id, hit);
+        }
+      }
+      retrieved = fused.flatMap((row) => {
+        const chunk = byId.get(row.id);
+        if (!chunk) return [];
+        return [{ ...chunk, score: row.score, scoreKind: 'rrf' as const }];
+      });
+    }
 
     const retrievedChunkIds = retrieved.map((c) => c.id);
     let rerankedChunkIds: string[] | undefined;
@@ -204,6 +272,8 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
         latencyMs,
         retrievedChunkIds,
         rerankedChunkIds,
+        rewrittenQuery,
+        multiQueries,
         forceAbstain: { reason: abstainCheck.reason ?? 'empty_retrieval' },
       };
     }
@@ -211,7 +281,7 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
     if (config.rerankingEnabled && deps.reranker && retrieved.length > 0) {
       const rerankStarted = Date.now();
       retrieved = await deps.reranker.rerank({
-        query: input.query,
+        query: activeQuery,
         chunks: retrieved,
         topN: config.rerankTopN,
       });
@@ -221,7 +291,23 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
       retrieved = retrieved.slice(0, config.topK);
     }
 
-    return { evidence: retrieved, latencyMs, retrievedChunkIds, rerankedChunkIds };
+    if (config.contextCompressionEnabled) {
+      const compressStarted = Date.now();
+      retrieved = compressEvidence(retrieved, {
+        maxChunks: Math.min(config.topK, config.rerankTopN || config.topK),
+        maxCharsPerChunk: 600,
+      });
+      latencyMs.compress = Date.now() - compressStarted;
+    }
+
+    return {
+      evidence: retrieved,
+      latencyMs,
+      retrievedChunkIds,
+      rerankedChunkIds,
+      rewrittenQuery,
+      multiQueries,
+    };
   }
 
   function buildMessages(query: string, retrieved: RetrievedChunk[]) {
@@ -242,6 +328,8 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
         return finalizeAnswer('', stage.evidence, stage.latencyMs, config, {
           retrievedChunkIds: stage.retrievedChunkIds,
           rerankedChunkIds: stage.rerankedChunkIds,
+          rewrittenQuery: stage.rewrittenQuery,
+          multiQueries: stage.multiQueries,
           forceAbstain: stage.forceAbstain ?? { reason: 'empty_retrieval' },
         });
       }
@@ -252,6 +340,8 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
       return finalizeAnswer(raw, stage.evidence, stage.latencyMs, config, {
         retrievedChunkIds: stage.retrievedChunkIds,
         rerankedChunkIds: stage.rerankedChunkIds,
+        rewrittenQuery: stage.rewrittenQuery,
+        multiQueries: stage.multiQueries,
       });
     },
 
@@ -264,6 +354,8 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
           const payload = finalizeAnswer('', stage.evidence, stage.latencyMs, config, {
             retrievedChunkIds: stage.retrievedChunkIds,
             rerankedChunkIds: stage.rerankedChunkIds,
+            rewrittenQuery: stage.rewrittenQuery,
+            multiQueries: stage.multiQueries,
             forceAbstain: stage.forceAbstain ?? { reason: 'empty_retrieval' },
           });
           yield { type: 'diagnostics', diagnostics: payload.diagnostics } satisfies StreamEvent;
@@ -277,6 +369,11 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
           diagnostics: {
             retrievalStrategy: config.retrievalStrategy,
             rerankingEnabled: config.rerankingEnabled,
+            queryRewriteEnabled: config.queryRewriteEnabled,
+            multiQueryEnabled: config.multiQueryEnabled,
+            contextCompressionEnabled: config.contextCompressionEnabled,
+            rewrittenQuery: stage.rewrittenQuery,
+            multiQueries: stage.multiQueries,
             retrievedChunkIds: stage.retrievedChunkIds,
             rerankedChunkIds: stage.rerankedChunkIds,
             latencyMs: stage.latencyMs,
@@ -295,6 +392,8 @@ export function createRagOrchestrator(deps: RagDeps): RagOrchestrator {
         const payload = finalizeAnswer(raw, stage.evidence, stage.latencyMs, config, {
           retrievedChunkIds: stage.retrievedChunkIds,
           rerankedChunkIds: stage.rerankedChunkIds,
+          rewrittenQuery: stage.rewrittenQuery,
+          multiQueries: stage.multiQueries,
         });
         for (const citation of payload.citations) {
           yield { type: 'citation', citation } satisfies StreamEvent;

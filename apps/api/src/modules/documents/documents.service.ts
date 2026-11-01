@@ -32,10 +32,13 @@ export type DocumentDto = {
   mimeType: string;
   byteSize: number;
   status: DocumentStatus;
+  chunkingStrategy: string;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+const CHUNKING_STRATEGIES = new Set(['fixed', 'structure_aware', 'parent_child']);
 
 @Injectable()
 export class DocumentsService {
@@ -113,15 +116,25 @@ export class DocumentsService {
     };
   }
 
+  private resolveChunkingStrategy(requested?: string): string {
+    if (requested && CHUNKING_STRATEGIES.has(requested)) {
+      return requested;
+    }
+    if (this.env.parentChildEnabled) return 'parent_child';
+    return 'structure_aware';
+  }
+
   async upload(
     tenantId: string,
     file: Express.Multer.File,
+    options?: { chunkingStrategy?: string },
   ): Promise<DocumentDto & { deduplicated: boolean }> {
     if (!file) {
       throw new BadRequestException('file is required');
     }
     const mimeType = this.resolveMime(file.mimetype, file.originalname);
     this.assertAllowed(file.originalname, mimeType, file.size);
+    const chunkingStrategy = this.resolveChunkingStrategy(options?.chunkingStrategy);
 
     const contentHash = createHash('sha256').update(file.buffer).digest('hex');
     const existing = await this.db.document.findFirst({
@@ -146,6 +159,7 @@ export class DocumentsService {
         storageKey,
         byteSize: file.size,
         contentHash,
+        chunkingStrategy,
         status: DocumentStatus.queued,
       },
     });
@@ -168,16 +182,27 @@ export class DocumentsService {
     return { id, deleted: true };
   }
 
-  async retryIngestion(tenantId: string, id: string) {
+  async retryIngestion(
+    tenantId: string,
+    id: string,
+    options?: { chunkingStrategy?: string },
+  ) {
     const doc = await this.db.document.findFirst({
       where: { id, tenantId, deletedAt: null },
     });
     if (!doc) {
       throw new NotFoundException('Document not found');
     }
+    const chunkingStrategy = options?.chunkingStrategy
+      ? this.resolveChunkingStrategy(options.chunkingStrategy)
+      : doc.chunkingStrategy;
     await this.db.document.update({
       where: { id },
-      data: { status: DocumentStatus.queued, errorMessage: null },
+      data: {
+        status: DocumentStatus.queued,
+        errorMessage: null,
+        chunkingStrategy,
+      },
     });
     await this.enqueueIngestion(tenantId, id);
     return this.get(tenantId, id);
@@ -219,6 +244,7 @@ export class DocumentsService {
     mimeType: string;
     byteSize: number;
     status: DocumentStatus;
+    chunkingStrategy: string;
     errorMessage: string | null;
     createdAt: Date;
     updatedAt: Date;
@@ -230,6 +256,7 @@ export class DocumentsService {
       mimeType: doc.mimeType,
       byteSize: doc.byteSize,
       status: doc.status,
+      chunkingStrategy: doc.chunkingStrategy,
       errorMessage: doc.errorMessage,
       createdAt: doc.createdAt.toISOString(),
       updatedAt: doc.updatedAt.toISOString(),

@@ -71,6 +71,10 @@ export type AppEnv = z.infer<typeof envSchema> & {
   hybridSearchEnabled: boolean;
   rerankingEnabled: boolean;
   objectStorageEnabled: boolean;
+  queryRewriteEnabled: boolean;
+  multiQueryEnabled: boolean;
+  parentChildEnabled: boolean;
+  experimentLabEnabled: boolean;
 };
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
@@ -100,6 +104,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
 
   const hybridSearchEnabled = data.FF_HYBRID_SEARCH ?? true;
   const rerankingEnabled = data.FF_RERANKING ?? false;
+  // Advanced stages default off; experiment lab on in non-production for demos.
+  const queryRewriteEnabled = data.FF_QUERY_REWRITE ?? false;
+  const multiQueryEnabled = data.FF_MULTI_QUERY ?? false;
+  const parentChildEnabled = data.FF_PARENT_CHILD ?? false;
+  const experimentLabEnabled =
+    data.FF_EXPERIMENT_LAB ?? data.APP_NODE_ENV !== 'production';
   const objectStorageEnabled =
     data.STORAGE_BUCKET.trim().length > 0 &&
     data.STORAGE_ACCESS_KEY.trim().length > 0 &&
@@ -113,5 +123,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     hybridSearchEnabled,
     rerankingEnabled,
     objectStorageEnabled,
+    queryRewriteEnabled,
+    multiQueryEnabled,
+    parentChildEnabled,
+    experimentLabEnabled,
   };
 }

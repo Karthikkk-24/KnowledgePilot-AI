@@ -5,8 +5,14 @@
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? process.env.API_URL ?? 'http://localhost:3001';
 
-async function request(path, init) {
-  const response = await fetch(`${API_URL}${path}`, init);
+async function request(path, init = {}) {
+  const headers = {
+    ...(init.headers || {}),
+    // stub auth defaults on API; explicit headers keep CI deterministic
+    'x-kp-user-id': process.env.KP_USER_ID || 'user_knowledgepilot_stub',
+    'x-kp-tenant-id': process.env.KP_TENANT_ID || 'tenant_knowledgepilot_default',
+  };
+  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
   const json = await response.json();
   if (!response.ok || json.error) {
     throw new Error(json.error?.message || `Request failed (${response.status}) for ${path}`);

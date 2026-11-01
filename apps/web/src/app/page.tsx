@@ -7,7 +7,7 @@ export default function HomePage() {
   return (
     <main style={{ maxWidth: 880, margin: '0 auto', padding: '2.5rem 1.5rem 4rem' }}>
       <p style={{ margin: 0, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.75rem', color: 'var(--muted)' }}>
-        Phase 3 · Evaluation
+        Phase 5 · Advanced RAG & experiment lab
       </p>
       <h1
         style={{
@@ -20,12 +20,12 @@ export default function HomePage() {
         {APP_NAME}
       </h1>
       <p style={{ margin: 0, color: 'var(--muted)', fontSize: '1.05rem', lineHeight: 1.6, maxWidth: 640 }}>
-        Upload documents, chat with hybrid retrieval, and run a seeded benchmark to store Recall@k,
-        MRR, faithfulness, and citation metrics.
+        Compare retrieval configs on the same benchmark — rewrite, multi-query, parent-child
+        chunking, and side-by-side metrics in the experiment lab.
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.75rem', flexWrap: 'wrap' }}>
         <Link
-          href="/evaluation"
+          href="/lab"
           style={{
             background: 'var(--accent)',
             color: '#fff',
@@ -34,7 +34,20 @@ export default function HomePage() {
             borderRadius: 10,
           }}
         >
-          Open evaluation
+          Open experiment lab
+        </Link>
+        <Link
+          href="/evaluation"
+          style={{
+            border: '1px solid var(--line)',
+            color: 'var(--ink)',
+            textDecoration: 'none',
+            padding: '0.75rem 1.1rem',
+            borderRadius: 10,
+            background: 'var(--panel)',
+          }}
+        >
+          Evaluation
         </Link>
         <Link
           href="/documents"

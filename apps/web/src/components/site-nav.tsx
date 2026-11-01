@@ -6,6 +6,8 @@ const links = [
   { href: '/documents', label: 'Documents' },
   { href: '/chat', label: 'Chat' },
   { href: '/evaluation', label: 'Evaluation' },
+  { href: '/lab', label: 'Lab' },
+  { href: '/settings', label: 'Settings' },
 ];
 
 export function SiteNav() {

@@ -222,6 +222,7 @@ export async function insertChunkWithEmbedding(
     charEnd: number;
     ordinal: number;
     embedding: number[];
+    parentChunkId?: string;
   },
 ) {
   const chunk = await db.chunk.create({
@@ -229,6 +230,7 @@ export async function insertChunkWithEmbedding(
       id: data.id,
       tenantId: data.tenantId,
       documentId: data.documentId,
+      parentChunkId: data.parentChunkId,
       content: data.content,
       tokenCount: data.tokenCount,
       headingPath: data.headingPath,

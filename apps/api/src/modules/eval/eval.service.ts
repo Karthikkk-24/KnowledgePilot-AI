@@ -17,6 +17,7 @@ import {
   } from '@knowledgepilot/db';
 import {
   defaultPipelineConfig,
+  mergePipelineConfig,
   resolveRelevantChunkIds,
   type PipelineConfig,
   type RetrievalStrategy,
@@ -32,6 +33,9 @@ export type StartEvalInput = {
   retrievalStrategy?: RetrievalStrategy;
   rerankingEnabled?: boolean;
   topK?: number;
+  experimentConfigId?: string;
+  /** Full pipeline config override (lab / advanced runs). */
+  config?: Partial<PipelineConfig>;
 };
 
 export type BenchmarkListItem = {
@@ -75,6 +79,7 @@ export type EvalRunDto = {
   estimatedCostUsd: number | null;
   errorMessage: string | null;
   configSnapshot: unknown;
+  experimentConfigId: string | null;
   benchmarkSet: { id: string; name: string; version: string };
   startedAt: string | null;
   finishedAt: string | null;
@@ -279,6 +284,7 @@ export class EvalService {
       estimatedCostUsd: row.estimatedCostUsd,
       errorMessage: row.errorMessage,
       configSnapshot: row.configSnapshot,
+      experimentConfigId: row.experimentConfigId,
       benchmarkSet: row.benchmarkSet,
       startedAt: row.startedAt?.toISOString() ?? null,
       finishedAt: row.finishedAt?.toISOString() ?? null,
@@ -307,6 +313,7 @@ export class EvalService {
       estimatedCostUsd: run.estimatedCostUsd,
       errorMessage: run.errorMessage,
       configSnapshot: run.configSnapshot,
+      experimentConfigId: run.experimentConfigId,
       benchmarkSet: run.benchmarkSet,
       startedAt: run.startedAt?.toISOString() ?? null,
       finishedAt: run.finishedAt?.toISOString() ?? null,
@@ -344,23 +351,44 @@ export class EvalService {
       throw new BadRequestException('Benchmark set is empty; seed fixtures first');
     }
 
-    let retrievalStrategy = input.retrievalStrategy ?? this.env.RAG_RETRIEVAL_STRATEGY;
+    let retrievalStrategy =
+      input.config?.retrievalStrategy ??
+      input.retrievalStrategy ??
+      this.env.RAG_RETRIEVAL_STRATEGY;
     if (!this.env.hybridSearchEnabled && retrievalStrategy === 'hybrid') {
       retrievalStrategy = 'vector';
     }
 
-    const configSnapshot: PipelineConfig = {
-      ...defaultPipelineConfig,
+    const configSnapshot = mergePipelineConfig(defaultPipelineConfig, {
+      ...input.config,
       retrievalStrategy,
-      rerankingEnabled: input.rerankingEnabled ?? this.env.rerankingEnabled,
-      topK: input.topK ?? this.env.RAG_DEFAULT_TOP_K,
-      abstentionThreshold: this.env.RAG_ABSTENTION_THRESHOLD,
-    };
+      rerankingEnabled:
+        input.config?.rerankingEnabled ??
+        input.rerankingEnabled ??
+        this.env.rerankingEnabled,
+      topK: input.config?.topK ?? input.topK ?? this.env.RAG_DEFAULT_TOP_K,
+      abstentionThreshold:
+        input.config?.abstentionThreshold ?? this.env.RAG_ABSTENTION_THRESHOLD,
+      queryRewriteEnabled:
+        input.config?.queryRewriteEnabled ?? this.env.queryRewriteEnabled,
+      multiQueryEnabled:
+        input.config?.multiQueryEnabled ?? this.env.multiQueryEnabled,
+    });
+
+    if (input.experimentConfigId) {
+      const experiment = await this.db.experimentConfig.findFirst({
+        where: { id: input.experimentConfigId, tenantId },
+      });
+      if (!experiment) {
+        throw new BadRequestException('Experiment config not found for tenant');
+      }
+    }
 
     const run = await this.db.evalRun.create({
       data: {
         tenantId: tenantId,
         benchmarkSetId: set.id,
+        experimentConfigId: input.experimentConfigId ?? null,
         state: EvalRunState.queued,
         label: input.label ?? null,
         configSnapshot,

@@ -5,14 +5,25 @@ export {
   type RetrievalStrategy,
 } from './types';
 export {
+  mergePipelineConfig,
+  parsePipelineConfig,
+  pipelineConfigSchema,
+  presetLabConfigs,
+  summarizePipelineConfig,
+} from './config/pipeline-config';
+export {
   createRagOrchestrator,
   type AnswerCitation,
+  type AnswerDiagnostics,
   type AnswerInput,
   type AnswerPayload,
   type RagDeps,
   type RagOrchestrator,
   type StreamEvent,
 } from './pipeline/orchestrator';
+export { rewriteQuery, expandMultiQueries, heuristicRewrite } from './pipeline/query-rewrite';
+export { compressEvidence } from './pipeline/context-compression';
+export { chunkParentChild, type ParentChildChunk } from './chunking/parent-child';
 export {
   parseCitationIds,
   validateCitations,
