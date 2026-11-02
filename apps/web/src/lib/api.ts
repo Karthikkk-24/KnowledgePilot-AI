@@ -1,4 +1,11 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+import {
+  AUTH_HEADERS,
+  WEB_STORAGE_KEYS,
+  type RetrievalStrategyName,
+} from '../constants';
+import { resolveApiUrl } from './api-url';
+
+const API_URL = resolveApiUrl();
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? 'stub';
 
 export type ApiEnvelope<T> = {
@@ -12,16 +19,16 @@ function authHeaders(): HeadersInit {
   if (AUTH_MODE === 'stub') {
     // Optional overrides for multi-tenant demos / isolation tests from the browser.
     if (typeof window !== 'undefined') {
-      const userId = window.localStorage.getItem('kp_user_id');
-      const tenantId = window.localStorage.getItem('kp_tenant_id');
-      if (userId) headers['x-kp-user-id'] = userId;
-      if (tenantId) headers['x-kp-tenant-id'] = tenantId;
+      const userId = window.localStorage.getItem(WEB_STORAGE_KEYS.userId);
+      const tenantId = window.localStorage.getItem(WEB_STORAGE_KEYS.tenantId);
+      if (userId) headers[AUTH_HEADERS.userId] = userId;
+      if (tenantId) headers[AUTH_HEADERS.tenantId] = tenantId;
     }
   }
   return headers;
 }
 
-export type RetrievalStrategy = 'vector' | 'keyword' | 'hybrid';
+export type RetrievalStrategy = RetrievalStrategyName;
 
 export type ChatFilters = {
   documentIds?: string[];

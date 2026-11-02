@@ -7,6 +7,7 @@ import {
 import { loadEnv } from '@knowledgepilot/config';
 import { createDbClient, Prisma } from '@knowledgepilot/db';
 import {
+  defaultPipelineConfig,
   mergePipelineConfig,
   parsePipelineConfig,
   presetLabConfigs,
@@ -274,19 +275,7 @@ export class LabService {
         configSnapshot = parsePipelineConfig(run.configSnapshot);
       } catch {
         configSnapshot = mergePipelineConfig(
-          {
-            retrievalStrategy: 'hybrid',
-            chunkingStrategy: 'structure_aware',
-            rerankingEnabled: false,
-            topK: 8,
-            rerankTopN: 5,
-            candidateMultiplier: 4,
-            queryRewriteEnabled: false,
-            multiQueryEnabled: false,
-            contextCompressionEnabled: false,
-            abstentionThreshold: 0.15,
-            rrfK: 60,
-          },
+          defaultPipelineConfig,
           (run.configSnapshot ?? {}) as Partial<PipelineConfig>,
         );
       }

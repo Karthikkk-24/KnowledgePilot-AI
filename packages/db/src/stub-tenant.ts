@@ -1,10 +1,12 @@
 import type { PrismaClient } from '@prisma/client';
 import { MembershipRole } from '@prisma/client';
+import {
+  STUB_TENANT_ID,
+  STUB_TENANT_SLUG,
+  STUB_USER_ID,
+} from '@knowledgepilot/shared';
 
-/** Fixed Phase-1 single-tenant id so local demos stay stable across restarts. */
-export const STUB_TENANT_ID = 'tenant_knowledgepilot_default';
-export const STUB_TENANT_SLUG = 'default';
-export const STUB_USER_ID = 'user_knowledgepilot_stub';
+export { STUB_TENANT_ID, STUB_TENANT_SLUG, STUB_USER_ID };
 
 export async function ensureStubTenant(db: PrismaClient) {
   return db.tenant.upsert({

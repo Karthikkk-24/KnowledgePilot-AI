@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { APP_NAME, APP_VERSION } from '@knowledgepilot/shared';
+import { resolveApiUrl } from '../lib/api-url';
 
-const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const apiBase = resolveApiUrl();
 
 export default function HomePage() {
   return (

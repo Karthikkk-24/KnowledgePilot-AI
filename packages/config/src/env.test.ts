@@ -10,6 +10,13 @@ describe('loadEnv', () => {
     expect(env.AUTH_PROVIDER).toBe('stub');
   });
 
+  it('treats blank env strings as unset and applies defaults', () => {
+    const env = loadEnv({ AUTH_PROVIDER: '', EMBEDDING_DIMS: '', APP_PORT: '' });
+    expect(env.AUTH_PROVIDER).toBe('stub');
+    expect(env.EMBEDDING_DIMS).toBe(1536);
+    expect(env.APP_PORT).toBe(3001);
+  });
+
   it('uses openai when LLM_API_KEY is set', () => {
     const env = loadEnv({ LLM_API_KEY: 'sk-test' });
     expect(env.resolvedLlmProvider).toBe('openai');

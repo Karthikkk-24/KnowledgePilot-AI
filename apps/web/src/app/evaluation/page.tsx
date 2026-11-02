@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { BENCHMARK_IDS } from '../../constants';
 import { api, type EvalRunSummary } from '../../lib/api';
 
 export default function EvaluationPage() {
@@ -156,7 +157,7 @@ export default function EvaluationPage() {
             type="button"
             disabled={busy || !agentEnabled}
             onClick={() =>
-              void onStart({ agentMode: true, benchmarkSetId: 'bench_multihop_v1' })
+              void onStart({ agentMode: true, benchmarkSetId: BENCHMARK_IDS.multihop })
             }
             title={agentEnabled ? undefined : 'Enable FF_AGENTIC_RAG'}
             style={{

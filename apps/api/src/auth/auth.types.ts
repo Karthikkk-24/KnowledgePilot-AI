@@ -1,4 +1,5 @@
 import type { MembershipRole } from '@knowledgepilot/db';
+import { AUTH_HEADERS } from '@knowledgepilot/shared';
 
 export type AuthPrincipal = {
   userId: string;
@@ -9,5 +10,5 @@ export type AuthPrincipal = {
   requestId: string;
 };
 
-export const AUTH_HEADER_USER = 'x-kp-user-id';
-export const AUTH_HEADER_TENANT = 'x-kp-tenant-id';
+export const AUTH_HEADER_USER = AUTH_HEADERS.userId;
+export const AUTH_HEADER_TENANT = AUTH_HEADERS.tenantId;

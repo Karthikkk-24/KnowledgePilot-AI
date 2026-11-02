@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { BENCHMARK_FIXTURE_SLUGS } from '@knowledgepilot/shared';
 
 export type SmokeBenchmarkFixture = {
   id: string;
@@ -33,7 +34,7 @@ function resolveFixtureDir(slug: string): string {
 }
 
 export function resolveSmokeFixtureDir(): string {
-  return resolveFixtureDir('smoke-v1');
+  return resolveFixtureDir(BENCHMARK_FIXTURE_SLUGS.smoke);
 }
 
 export function loadSmokeBenchmarkFixture(): {
@@ -51,7 +52,7 @@ export function loadMultihopBenchmarkFixture(): {
   dir: string;
   fixture: SmokeBenchmarkFixture;
 } {
-  const dir = resolveFixtureDir('multihop-v1');
+  const dir = resolveFixtureDir(BENCHMARK_FIXTURE_SLUGS.multihop);
   const fixture = JSON.parse(
     readFileSync(path.join(dir, 'benchmark.json'), 'utf8'),
   ) as SmokeBenchmarkFixture;

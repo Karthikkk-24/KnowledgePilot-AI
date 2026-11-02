@@ -39,8 +39,10 @@ export async function executeAgentTool(
     };
   }
 
+  const args = action.args as Record<string, unknown>;
+
   if (action.name === 'search_knowledge') {
-    const query = asString(action.args.query);
+    const query = asString(args.query);
     if (!query) {
       return { ok: false, summary: 'search_knowledge requires query' };
     }
@@ -65,7 +67,7 @@ export async function executeAgentTool(
   }
 
   if (action.name === 'get_chunk') {
-    const chunkId = asString(action.args.chunkId);
+    const chunkId = asString(args.chunkId);
     if (!chunkId) {
       return { ok: false, summary: 'get_chunk requires chunkId' };
     }

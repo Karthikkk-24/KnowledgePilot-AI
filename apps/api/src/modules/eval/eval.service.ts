@@ -22,6 +22,7 @@ import {
   type PipelineConfig,
   type RetrievalStrategy,
 } from '@knowledgepilot/rag';
+import { QUEUE_JOB_NAMES } from '@knowledgepilot/shared';
 import { createBlobStorage } from '../../adapters/storage.factory';
 import { INGESTION_QUEUE, type IngestionJobPayload } from '../ingestion/ingestion.constants';
 import {
@@ -436,7 +437,7 @@ export class EvalService {
     });
 
     const payload: EvalJobPayload = { tenantId: tenantId, evalRunId: run.id };
-    const bullJob = await this.evalQueue.add('run', payload, {
+    const bullJob = await this.evalQueue.add(QUEUE_JOB_NAMES.evalRun, payload, {
       attempts: 1,
       removeOnComplete: 50,
       removeOnFail: 100,
@@ -463,7 +464,7 @@ export class EvalService {
       documentId,
       ingestionJobId: job.id,
     };
-    const bullJob = await this.ingestionQueue.add('ingest', payload, {
+    const bullJob = await this.ingestionQueue.add(QUEUE_JOB_NAMES.ingest, payload, {
       attempts: this.env.INGESTION_MAX_ATTEMPTS,
       backoff: { type: 'exponential', delay: this.env.INGESTION_BACKOFF_MS },
       removeOnComplete: 50,

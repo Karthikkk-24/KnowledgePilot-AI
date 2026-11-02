@@ -22,6 +22,7 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@knowledgepilot/shared": "workspace:*",
     "@prisma/client": "^6.9.0"
   },
   "devDependencies": {

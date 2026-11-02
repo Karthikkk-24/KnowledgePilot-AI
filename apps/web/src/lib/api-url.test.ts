@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-
-function resolveApiUrl(value: string | undefined) {
-  return value ?? 'http://localhost:3001';
-}
+import { DEFAULT_API_ORIGIN } from '../constants';
+import { resolveApiUrl } from './api-url';
 
 describe('resolveApiUrl', () => {
-  it('falls back to local api', () => {
-    expect(resolveApiUrl(undefined)).toBe('http://localhost:3001');
+  it('falls back to shared default origin', () => {
+    expect(resolveApiUrl(undefined)).toBe(DEFAULT_API_ORIGIN);
+    expect(resolveApiUrl('')).toBe(DEFAULT_API_ORIGIN);
+  });
+
+  it('keeps an explicit override', () => {
+    expect(resolveApiUrl('https://api.example.com')).toBe('https://api.example.com');
   });
 });

@@ -16,6 +16,7 @@ import {
   extractTextFromBuffer,
   hashContent,
 } from '@knowledgepilot/rag';
+import { PARENT_CHILD_MIN_PARENT_SIZE, QUEUE_JOB_NAMES } from '@knowledgepilot/shared';
 import { createEmbedder } from '../../adapters/ai.factory';
 import { createBlobStorage } from '../../adapters/storage.factory';
 import { insertChunkWithEmbedding } from '../../adapters/prisma-chunk.repository';
@@ -92,7 +93,10 @@ export class IngestionProcessor extends WorkerHost {
 
       if (requestedStrategy === 'parent_child') {
         const { parents, children } = chunkParentChild(extracted.text, {
-          parentSize: Math.max(this.env.RAG_DEFAULT_CHUNK_SIZE * 2, 1200),
+          parentSize: Math.max(
+            this.env.RAG_DEFAULT_CHUNK_SIZE * 2,
+            PARENT_CHILD_MIN_PARENT_SIZE,
+          ),
           childSize: this.env.RAG_DEFAULT_CHUNK_SIZE,
           childOverlap: this.env.RAG_DEFAULT_CHUNK_OVERLAP,
         });

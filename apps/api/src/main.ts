@@ -6,6 +6,12 @@ import helmet from 'helmet';
 import { loadEnv } from '@knowledgepilot/config';
 import { createDbClient, ensureStubTenant, ensureStubUser } from '@knowledgepilot/db';
 import { createLogger } from '@knowledgepilot/logger';
+import {
+  API_GLOBAL_PREFIX,
+  CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
+  HEALTH_PATHS,
+} from '@knowledgepilot/shared';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -45,20 +51,14 @@ async function bootstrap() {
   app.enableCors({
     origin: env.APP_WEB_ORIGIN,
     credentials: true,
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'x-request-id',
-      'x-kp-user-id',
-      'x-kp-tenant-id',
-    ],
-    exposedHeaders: ['x-request-id'],
+    allowedHeaders: [...CORS_ALLOWED_HEADERS],
+    exposedHeaders: [...CORS_EXPOSED_HEADERS],
   });
 
-  app.setGlobalPrefix('v1', {
+  app.setGlobalPrefix(API_GLOBAL_PREFIX, {
     exclude: [
-      { path: 'health', method: RequestMethod.GET },
-      { path: 'ready', method: RequestMethod.GET },
+      { path: HEALTH_PATHS.live, method: RequestMethod.GET },
+      { path: HEALTH_PATHS.ready, method: RequestMethod.GET },
     ],
   });
 

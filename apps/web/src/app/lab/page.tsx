@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { RAG_DEFAULTS } from '../../constants';
 import {
   api,
   type ExperimentConfig,
@@ -14,14 +15,14 @@ const defaultDraft: PipelineConfig = {
   retrievalStrategy: 'hybrid',
   chunkingStrategy: 'structure_aware',
   rerankingEnabled: false,
-  topK: 8,
-  rerankTopN: 5,
-  candidateMultiplier: 4,
+  topK: RAG_DEFAULTS.topK,
+  rerankTopN: RAG_DEFAULTS.rerankTopN,
+  candidateMultiplier: RAG_DEFAULTS.candidateMultiplier,
   queryRewriteEnabled: false,
   multiQueryEnabled: false,
   contextCompressionEnabled: false,
-  abstentionThreshold: 0.15,
-  rrfK: 60,
+  abstentionThreshold: RAG_DEFAULTS.abstentionThreshold,
+  rrfK: RAG_DEFAULTS.rrfK,
 };
 
 function metric(row: LabCompareRow, key: string): string {

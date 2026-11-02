@@ -12,18 +12,19 @@ import {
   IngestionJobState,
 } from '@knowledgepilot/db';
 import { loadEnv } from '@knowledgepilot/config';
+import {
+  CHUNKING_STRATEGIES,
+  QUEUE_JOB_NAMES,
+  UPLOAD_ALLOWED_EXTENSIONS,
+  UPLOAD_ALLOWED_MIME,
+  type ChunkingStrategyName,
+} from '@knowledgepilot/shared';
 import { createBlobStorage } from '../../adapters/storage.factory';
 import { INGESTION_QUEUE, type IngestionJobPayload } from '../ingestion/ingestion.constants';
 
-const ALLOWED_MIME = new Set([
-  'application/pdf',
-  'text/plain',
-  'text/markdown',
-  'text/html',
-  'application/octet-stream',
-]);
-
-const ALLOWED_EXT = ['.pdf', '.txt', '.md', '.markdown', '.html', '.htm'];
+const ALLOWED_MIME = new Set<string>(UPLOAD_ALLOWED_MIME);
+const ALLOWED_EXT = [...UPLOAD_ALLOWED_EXTENSIONS];
+const CHUNKING_STRATEGY_SET = new Set<string>(CHUNKING_STRATEGIES);
 
 export type DocumentDto = {
   id: string;
@@ -37,8 +38,6 @@ export type DocumentDto = {
   createdAt: string;
   updatedAt: string;
 };
-
-const CHUNKING_STRATEGIES = new Set(['fixed', 'structure_aware', 'parent_child']);
 
 @Injectable()
 export class DocumentsService {
@@ -116,9 +115,9 @@ export class DocumentsService {
     };
   }
 
-  private resolveChunkingStrategy(requested?: string): string {
-    if (requested && CHUNKING_STRATEGIES.has(requested)) {
-      return requested;
+  private resolveChunkingStrategy(requested?: string): ChunkingStrategyName {
+    if (requested && CHUNKING_STRATEGY_SET.has(requested)) {
+      return requested as ChunkingStrategyName;
     }
     if (this.env.parentChildEnabled) return 'parent_child';
     return 'structure_aware';
@@ -224,7 +223,7 @@ export class DocumentsService {
       ingestionJobId: job.id,
     };
 
-    const bullJob = await this.ingestionQueue.add('ingest', payload, {
+    const bullJob = await this.ingestionQueue.add(QUEUE_JOB_NAMES.ingest, payload, {
       attempts: this.env.INGESTION_MAX_ATTEMPTS,
       backoff: { type: 'exponential', delay: this.env.INGESTION_BACKOFF_MS },
       removeOnComplete: 50,

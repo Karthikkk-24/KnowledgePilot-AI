@@ -1,14 +1,11 @@
+import {
+  AGENT_TOOL_NAMES,
+  type AgentToolName,
+} from '@knowledgepilot/shared';
 import type { AnswerCitation, AnswerDiagnostics, AnswerPayload } from '../pipeline/orchestrator';
 import type { RetrievalStrategy } from '../types';
 
-export const AGENT_TOOL_NAMES = [
-  'search_knowledge',
-  'get_chunk',
-  'list_documents',
-  'finish',
-] as const;
-
-export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+export { AGENT_TOOL_NAMES, type AgentToolName };
 
 export type AgentToolCall = {
   name: Exclude<AgentToolName, 'finish'>;
